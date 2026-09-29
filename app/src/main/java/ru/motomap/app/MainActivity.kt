@@ -31,6 +31,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONArray
 import org.json.JSONObject
 import org.maplibre.android.MapLibre
@@ -313,6 +315,27 @@ private fun RideLocationTracker(context: Context, riding: Boolean, onChanged: (R
         if (!registered) onChanged(RideState(true))
         onDispose { runCatching { manager.removeUpdates(listener) } }
     }
+}
+
+private fun loadTrips(prefs: android.content.SharedPreferences): SnapshotStateList<Trip> {
+    val list = mutableStateListOf<Trip>()
+    val raw = prefs.getString("trips", null) ?: return list
+    runCatching {
+        val a = JSONArray(raw)
+        for (i in 0 until a.length()) {
+            val o = a.getJSONObject(i)
+            list.add(Trip(o.getString("date"), o.getDouble("km"), o.getString("time"), o.getInt("max"), o.getInt("avg"), o.getDouble("fuel")))
+        }
+    }
+    return list
+}
+
+private fun saveTrips(prefs: android.content.SharedPreferences, trips: List<Trip>) {
+    val a = JSONArray()
+    trips.take(100).forEach {
+        a.put(JSONObject().put("date", it.date).put("km", it.km).put("time", it.time).put("max", it.max).put("avg", it.avg).put("fuel", it.fuel))
+    }
+    prefs.edit().putString("trips", a.toString()).apply()
 }
 
 private fun formatDuration(seconds: Long): String {
