@@ -78,7 +78,7 @@ private fun MapScreen(riding: Boolean, toggle: () -> Unit, pad: PaddingValues) {
 @Composable
 private fun RideScreen(riding: Boolean, toggle: () -> Unit, pad: PaddingValues) {
     Column(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Текущая поездка", 28.sp, fontWeight = FontWeight.Bold)
+        Text("Текущая поездка", fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Stat("Скорость", "0 км/ч"); Stat("Расстояние", "0,0 км"); Stat("Время движения", "00:00"); Stat("Максимальная скорость", "0 км/ч"); Stat("Средняя скорость", "0 км/ч"); Stat("Расход", "5,2 л/100 км")
         Button(toggle, Modifier.fillMaxWidth().height(56.dp)) { Text(if (riding) "Завершить" else "Начать") }
     }
@@ -89,7 +89,7 @@ private fun RideScreen(riding: Boolean, toggle: () -> Unit, pad: PaddingValues) 
 @Composable
 private fun RoutesScreen(pad: PaddingValues) {
     Column(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Маршрут", 28.sp, fontWeight = FontWeight.Bold)
+        Text("Маршрут", fontSize = 28.sp, fontWeight = FontWeight.Bold)
         OutlinedTextField("", {}, placeholder = { Text("Введите пункт назначения") }, modifier = Modifier.fillMaxWidth())
         Route("Быстрый", "190 км • 2:20"); Route("Мото", "212 км • 2:48"); Route("Красивый", "248 км • 3:35"); Route("Повороты", "263 км • 3:52")
     }
@@ -99,7 +99,7 @@ private fun RoutesScreen(pad: PaddingValues) {
 @Composable
 private fun StatisticsScreen(trips: List<Trip>, pad: PaddingValues) {
     LazyColumn(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { Text("Статистика", 28.sp, fontWeight = FontWeight.Bold); Stat("Поездок", trips.size.toString()); Stat("Расстояние", "${"%.1f".format(trips.sumOf { it.km })} км"); Stat("Топливо", "${"%.1f".format(trips.sumOf { it.fuel })} л"); Text("История", 22.sp, fontWeight = FontWeight.Bold) }
+        item { Text("Статистика", fontSize = 28.sp, fontWeight = FontWeight.Bold); Stat("Поездок", trips.size.toString()); Stat("Расстояние", "${"%.1f".format(trips.sumOf { it.km })} км"); Stat("Топливо", "${"%.1f".format(trips.sumOf { it.fuel })} л"); Text("История", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
         items(trips) { t -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(t.date, fontWeight = FontWeight.Bold); Text("${t.km} км • ${t.time}"); Text("Средняя ${t.avg} км/ч • максимум ${t.max} км/ч"); Text("Топливо ${t.fuel} л") } } }
     }
 }
@@ -113,7 +113,7 @@ private fun SettingsScreen(pad: PaddingValues) {
     var luggage by remember { mutableStateOf("0") }
     LazyColumn(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Text("Мотоцикл", 28.sp, fontWeight = FontWeight.Bold)
+            Text("Мотоцикл", fontSize = 28.sp, fontWeight = FontWeight.Bold)
             Field("Мотоцикл", bike) { bike = it }; Field("Расход, л/100 км", fuel) { fuel = it }; Field("Вес водителя, кг", rider) { rider = it }; Field("Вес пассажира, кг", passenger) { passenger = it }; Field("Вес багажа, кг", luggage) { luggage = it }
         }
     }
