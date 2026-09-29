@@ -100,10 +100,7 @@ private fun MotoMapApp(hasLocationPermission: Boolean) {
     var routeRequest by remember { mutableStateOf<RouteRequest?>(null) }
     var selectedBike by remember { mutableStateOf(bikePresets.first()) }
 
-    val trips = remember { mutableStateListOf(
-        Trip("24.09.2026", 286.4, "4:17", 143, 67, 14.9),
-        Trip("19.09.2026", 174.2, "2:51", 128, 61, 8.9)
-    ) }
+    val trips = remember { loadTrips(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)) }
 
     MaterialTheme {
         Scaffold(bottomBar = {
@@ -183,7 +180,7 @@ private fun MapScreen(
         }
 
         map.cameraPosition = CameraPosition.Builder().target(LatLng(target.lat, target.lon)).zoom(12.5).build()
-        val origin = lastKnownLocation(context)
+        val origin = currentLocation(context)
         if (origin == null) {
             status = "Найдено: " + target.name + ". Для маршрута включите GPS."
             return@LaunchedEffect
@@ -276,29 +273,44 @@ private fun enableLocationIfAllowed(context: Context, map: MapLibreMap, allowed:
 
 @SuppressLint("MissingPermission")
 @Composable
-private fun RideLocationTracker(context: Context, riding: Boolean, current: RideState, onChanged: (RideState) -> Unit) {
+private fun RideLocationTracker(context: Context, riding: Boolean, onChanged: (RideState) -> Unit) {
     val manager = remember(context) { context.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
-    var lastLocation by remember { mutableStateOf<Location?>(null) }
-    var startTime by remember { mutableLongStateOf(0L) }
-
     DisposableEffect(riding) {
-        if (!riding) {
-            lastLocation = null
-            startTime = 0L
-            return@DisposableEffect onDispose {}
-        }
-        startTime = System.currentTimeMillis()
+        if (!riding) return@DisposableEffect onDispose {}
+        var last: Location? = null
+        var distance = 0.0
+        var maxSpeed = 0
+        val start = System.currentTimeMillis()
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                val previous = lastLocation
-                val segment = if (previous != null && location.accuracy <= 35f) previous.distanceTo(location).toDouble() else 0.0
-                val speed = if (location.hasSpeed()) (location.speed * 3.6f).roundToInt() else 0
-                val elapsed = ((System.currentTimeMillis() - startTime) / 1000L).coerceAtLeast(0L)
-                onChanged(current.copy(riding = true, speedKmh = speed, distanceKm = current.distanceKm + segment / 1000.0, elapsedSec = elapsed, maxSpeedKmh = maxOf(current.maxSpeedKmh, speed)))
-                lastLocation = location
+                val previous = last
+                if (previous != null && location.accuracy <= 50f && previous.accuracy <= 50f) {
+                    val d = previous.distanceTo(location).toDouble()
+                    if (d in 0.5..500.0) distance += d
+                }
+                val speed = if (location.hasSpeed() && location.speed >= 0f) {
+                    (location.speed * 3.6f).roundToInt()
+                } else if (previous != null) {
+                    val dt = (location.time - previous.time).coerceAtLeast(1000L)
+                    (previous.distanceTo(location) / dt * 3.6f).roundToInt()
+                } else 0
+                maxSpeed = maxOf(maxSpeed, speed)
+                onChanged(RideState(true, speed.coerceAtLeast(0), distance / 1000.0, (System.currentTimeMillis() - start) / 1000L, maxSpeed))
+                last = location
             }
         }
-        runCatching { manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 2f, listener) }
+        var registered = false
+        runCatching {
+            if (manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, listener)
+                registered = true
+            }
+            if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1500L, 2f, listener)
+                registered = true
+            }
+        }
+        if (!registered) onChanged(RideState(true))
         onDispose { runCatching { manager.removeUpdates(listener) } }
     }
 }
@@ -403,9 +415,9 @@ private fun StatisticsScreen(trips: List<Trip>, pad: PaddingValues) {
 @Composable
 private fun SettingsScreen(selectedBike: BikePreset, onBikeSelected: (BikePreset) -> Unit, pad: PaddingValues) {
     var expanded by remember { mutableStateOf(false) }
-    var rider by remember { mutableStateOf("80") }
-    var passenger by remember { mutableStateOf("0") }
-    var luggage by remember { mutableStateOf("0") }
+    var rider by remember { mutableStateOf(prefs.getString("rider_weight", "80") ?: "80") }
+    var passenger by remember { mutableStateOf(prefs.getString("passenger_weight", "0") ?: "0") }
+    var luggage by remember { mutableStateOf(prefs.getString("luggage_weight", "0") ?: "0") }
 
     LazyColumn(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -432,9 +444,9 @@ private fun SettingsScreen(selectedBike: BikePreset, onBikeSelected: (BikePreset
             Spec("Заводской расход", selectedBike.fuel)
             Spacer(Modifier.height(8.dp))
             Text("Параметры поездки", fontWeight = FontWeight.Bold)
-            Field("Вес водителя, кг", rider) { rider = it }
-            Field("Вес пассажира, кг", passenger) { passenger = it }
-            Field("Вес багажа, кг", luggage) { luggage = it }
+            Field("Вес водителя, кг", rider) { rider = it; prefs.edit().putString("rider_weight", it).apply() }
+            Field("Вес пассажира, кг", passenger) { passenger = it; prefs.edit().putString("passenger_weight", it).apply() }
+            Field("Вес багажа, кг", luggage) { luggage = it; prefs.edit().putString("luggage_weight", it).apply() }
         }
     }
 }
@@ -455,6 +467,41 @@ private fun Field(label: String, value: String, change: (String) -> Unit) {
 }
 
 private data class RouteResult(val points: List<LatLng>, val distanceKm: String, val minutes: String)
+
+@SuppressLint("MissingPermission")
+private suspend fun currentLocation(context: Context): Location? {
+    val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        .filter { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
+    val cached = providers.mapNotNull { runCatching { manager.getLastKnownLocation(it) }.getOrNull() }
+        .filter { System.currentTimeMillis() - it.time < 120000L }
+        .maxByOrNull { it.time }
+    if (cached != null) return cached
+    if (providers.isEmpty()) return null
+    return kotlinx.coroutines.withContext(Dispatchers.Main.immediate) {
+        suspendCancellableCoroutine { cont ->
+            var best: Location? = null
+            var done = false
+            lateinit var listener: LocationListener
+            fun finish(loc: Location?) {
+                if (done) return
+                done = true
+                runCatching { manager.removeUpdates(listener) }
+                if (cont.isActive) cont.resume(loc)
+            }
+            listener = object : LocationListener {
+                override fun onLocationChanged(location: Location) {
+                    if (best == null || location.accuracy < best!!.accuracy) best = location
+                    if (location.accuracy <= 50f) finish(location)
+                }
+            }
+            runCatching { providers.forEach { manager.requestLocationUpdates(it, 1000L, 1f, listener) } }
+                .onFailure { finish(null) }
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ finish(best) }, 10000L)
+            cont.invokeOnCancellation { runCatching { manager.removeUpdates(listener) } }
+        }
+    }
+}
 
 @SuppressLint("MissingPermission")
 private fun lastKnownLocation(context: Context): Location? {
