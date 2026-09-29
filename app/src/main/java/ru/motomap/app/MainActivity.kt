@@ -42,6 +42,9 @@ import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.LineString
+import org.maplibre.geojson.Point
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory.lineColor
 import org.maplibre.android.style.layers.PropertyFactory.lineWidth
@@ -179,7 +182,7 @@ private fun MapScreen(
             return@LaunchedEffect
         }
 
-        map.animateCamera(CameraPosition.Builder().target(LatLng(target.lat, target.lon)).zoom(12.5).build(), 800)
+        map.cameraPosition = CameraPosition.Builder().target(LatLng(target.lat, target.lon)).zoom(12.5).build()
         val origin = lastKnownLocation(context)
         if (origin == null) {
             status = "Найдено: " + target.name + ". Для маршрута включите GPS."
@@ -193,7 +196,7 @@ private fun MapScreen(
         } else {
             drawRoute(map, route)
             status = request.mode + ": " + route.distanceKm + " км • " + route.minutes + " мин"
-            map.animateCamera(CameraPosition.Builder().target(LatLng(target.lat, target.lon)).zoom(10.5).build(), 700)
+            map.cameraPosition = CameraPosition.Builder().target(LatLng(target.lat, target.lon)).zoom(10.5).build()
         }
     }
 
@@ -369,7 +372,7 @@ private fun RoutesScreen(routeRequest: RouteRequest?, onBuild: (RouteRequest) ->
         Button(
             onClick = { onBuild(RouteRequest(destination.trim(), selectedMode)) },
             enabled = destination.trim().isNotEmpty(),
-            Modifier.fillMaxWidth().height(56.dp)
+            modifier = Modifier.fillMaxWidth().height(56.dp)
         ) { Text("ПОСТРОИТЬ МАРШРУТ") }
     }
 }
@@ -538,9 +541,9 @@ private fun decodePolyline6(encoded: String): List<LatLng> {
 
 private fun drawRoute(map: MapLibreMap, result: RouteResult) {
     val style = map.style ?: return
-    val feature = com.mapbox.geojson.Feature.fromGeometry(
-        com.mapbox.geojson.LineString.fromLngLats(
-            result.points.map { com.mapbox.geojson.Point.fromLngLat(it.longitude, it.latitude) }
+    val feature = Feature.fromGeometry(
+        LineString.fromLngLats(
+            result.points.map { Point.fromLngLat(it.longitude, it.latitude) }
         )
     )
     style.removeLayer("motomap-route-line")
