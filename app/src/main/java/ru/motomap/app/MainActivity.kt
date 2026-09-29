@@ -128,7 +128,7 @@ private fun MapScreen(
 
     Box(Modifier.fillMaxSize().padding(pad)) {
         AndroidView(
-            Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 MapView(ctx).also { view ->
                     mapViewRef = view
