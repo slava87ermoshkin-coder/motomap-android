@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - v25-major-fixes
+      - v26-user-requested
   workflow_dispatch:
 
 jobs:
