@@ -277,9 +277,6 @@ private fun MapScreen(
                 MapView(ctx).also { view ->
                     mapViewRef = view
                     view.onCreate(null)
-                    // Compose may create this view after Activity.onResume().
-                    runCatching { view.onStart() }
-                    runCatching { view.onResume() }
                     view.getMapAsync { map ->
                         mapRef = map
                         map.setStyle(MAP_STYLE) { style ->
