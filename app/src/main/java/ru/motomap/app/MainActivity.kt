@@ -555,28 +555,51 @@ private fun RoutesScreen(routeRequest: RouteRequest?, onBuild: (RouteRequest) ->
 }
 
 @Composable
-private fun StatisticsScreen(trips: List<Trip>, pad: PaddingValues) {
+private fun StatisticsScreen(trips: androidx.compose.runtime.snapshots.SnapshotStateList<Trip>, pad: PaddingValues) {
+    var refresh by remember { mutableIntStateOf(0) }
+    val now = remember(refresh) { System.currentTimeMillis() }
+    fun millis(date: String) = runCatching { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).parse(date)?.time ?: 0L }.getOrDefault(0L)
+    fun period(days: Long) = trips.filter { millis(it.date) >= now - days * 24L * 60L * 60L * 1000L }
+    fun km(x: List<Trip>) = x.sumOf { it.km }
+    fun hours(x: List<Trip>) = x.sumOf { it.elapsedSec } / 3600.0
+    fun fuel(x: List<Trip>) = x.sumOf { it.fuel }
+    fun cost(x: List<Trip>) = x.sumOf { it.fuelCost }
+    fun avgFuel(x: List<Trip>) = if (km(x) > 0) fuel(x) * 100.0 / km(x) else 0.0
+    @Composable fun Block(title: String, x: List<Trip>) {
+        Text(title, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        Stat("Километры", "%.1f км".format(Locale.US, km(x)))
+        Stat("Часы", "%.1f ч".format(Locale.US, hours(x)))
+        Stat("Количество поездок", x.size.toString())
+        Stat("Средний расход", "%.2f л/100 км".format(Locale.US, avgFuel(x)))
+        Stat("Топливные затраты", "%.2f ₽".format(Locale.US, cost(x)))
+        Stat("Максимальная скорость", (x.maxOfOrNull { it.max } ?: 0).toString() + " км/ч")
+        Stat("Максимальная высота", (x.maxOfOrNull { it.maxAltitude } ?: 0.0).roundToInt().toString() + " м")
+        Stat("Самый длинный маршрут", "%.1f км".format(Locale.US, x.maxOfOrNull { it.km } ?: 0.0))
+    }
     LazyColumn(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Статистика", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Stat("Поездок", trips.size.toString())
-            Stat("Расстояние", "%.1f км".format(Locale.US, trips.sumOf { it.km }))
-            Stat("Топливо", "%.1f л".format(Locale.US, trips.sumOf { it.fuel }))
-            Text("История", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Block("За неделю", period(7))
+            Block("За месяц", period(30))
+            Block("За сезон", period(180))
+            Block("Всего", trips)
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = { trips.clear(); refresh++; }, Modifier.fillMaxWidth()) { Text("УДАЛИТЬ ВСЮ СТАТИСТИКУ") }
+            Text("История поездок", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         }
         items(trips) { t ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(t.date, fontWeight = FontWeight.Bold)
                     Text("%.1f км • %s".format(Locale.US, t.km, t.time))
-                    Text("Средняя %d км/ч • максимум %d км/ч".format(t.avg, t.max))
-                    Text("Топливо %.1f л".format(Locale.US, t.fuel))
+                    Text("Средняя " + t.avg + " км/ч • максимум " + t.max + " км/ч")
+                    Text("Высота " + t.maxAltitude.roundToInt() + " м • топливо %.2f л • %.2f ₽".format(Locale.US, t.fuel, t.fuelCost))
+                    TextButton(onClick = { trips.remove(t); refresh++ }) { Text("Удалить поездку") }
                 }
             }
         }
     }
 }
-
 @Composable
 private fun SettingsScreen(selectedBike: BikePreset, onBikeSelected: (BikePreset) -> Unit, pad: PaddingValues) {
     val context = androidx.compose.ui.platform.LocalContext.current
