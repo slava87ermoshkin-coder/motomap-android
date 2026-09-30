@@ -137,7 +137,7 @@ private fun MotoMapApp(hasLocationPermission: Boolean) {
         }) { pad ->
             when (tab) {
                 0 -> MapScreen(riding, rideState, hasLocationPermission, routeRequest,
-                    { toggleRide },
+                    toggleRide,
                     { rideState = it }, pad)
                 1 -> RideScreen(rideState,
                     { toggleRide },
@@ -265,7 +265,7 @@ private fun MapScreen(
                     }
                 }
             },
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = 150.dp, end = 12.dp),
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 220.dp, end = 12.dp),
             containerColor = MaterialTheme.colorScheme.primaryContainer
         ) {
             Text("⌾", fontSize = 28.sp, fontWeight = FontWeight.Bold)
@@ -281,6 +281,12 @@ private fun MapScreen(
                         label = { Text("Город или адрес") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = {
+                            if (destination.isNotBlank()) searchRequest = RouteRequest(destination.trim(), routeRequest?.mode ?: "Мото")
+                        }, onDone = {
+                            if (destination.isNotBlank()) searchRequest = RouteRequest(destination.trim(), routeRequest?.mode ?: "Мото")
+                        }),
                         trailingIcon = {
                             TextButton(
                                 enabled = destination.isNotBlank(),
