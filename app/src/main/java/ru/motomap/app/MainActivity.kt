@@ -32,6 +32,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -63,7 +64,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import kotlin.math.roundToInt
 
-private const val MAP_STYLE = "https://tiles.openfreemap.org/styles/bright"
+private const val MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty"
 private const val ROUTE_SERVER = "https://valhalla1.openstreetmap.de/route"
 private const val GEOCODER = "https://nominatim.openstreetmap.org/search"
 private const val PREFS = "motomap_prefs"
@@ -198,12 +199,25 @@ private fun MapScreen(
                 Lifecycle.Event.ON_RESUME -> mapView.onResume()
                 Lifecycle.Event.ON_PAUSE -> mapView.onPause()
                 Lifecycle.Event.ON_STOP -> mapView.onStop()
-                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
                 else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+
+        // MapScreen is often created while the Activity is already RESUMED.
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            runCatching { mapView.onStart() }
+        }
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            runCatching { mapView.onResume() }
+        }
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            runCatching { mapView.onPause() }
+            runCatching { mapView.onStop() }
+            runCatching { mapView.onDestroy() }
+        }
     }
 
     LaunchedEffect(mapRef, hasLocationPermission) {
@@ -263,6 +277,9 @@ private fun MapScreen(
                 MapView(ctx).also { view ->
                     mapViewRef = view
                     view.onCreate(null)
+                    // Compose may create this view after Activity.onResume().
+                    runCatching { view.onStart() }
+                    runCatching { view.onResume() }
                     view.getMapAsync { map ->
                         mapRef = map
                         map.setStyle(MAP_STYLE) { style ->
@@ -345,6 +362,21 @@ private fun MapScreen(
                 }
                 Button(onClick = onToggleRide, Modifier.fillMaxWidth().height(54.dp)) {
                     Text(if (riding) "ЗАВЕРШИТЬ ПОЕЗДКУ" else "НАЧАТЬ ПОЕЗДКУ", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    // Keep the trip timer running independently of GPS callbacks.
+    val latestRideState by rememberUpdatedState(rideState)
+    val latestOnRideStateChanged by rememberUpdatedState(onRideStateChanged)
+    LaunchedEffect(riding) {
+        if (riding) {
+            while (true) {
+                delay(1000L)
+                val current = latestRideState
+                if (current.riding) {
+                    latestOnRideStateChanged(current.copy(elapsedSec = current.elapsedSec + 1L))
                 }
             }
         }
@@ -784,16 +816,44 @@ private fun lastKnownLocation(context: Context): Location? {
 }
 
 private suspend fun geocode(query: String): Destination? = withContext(Dispatchers.IO) {
-    runCatching {
+    // Photon first; Nominatim is a fallback if Photon is temporarily unavailable.
+    val photon = runCatching {
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val url = URL(GEOCODER + "?format=jsonv2&limit=1&q=" + encoded)
+        val url = URL("https://photon.komoot.io/api/?limit=1&lang=ru&q=" + encoded)
         val connection = url.openConnection() as HttpURLConnection
-        connection.setRequestProperty("User-Agent", "MotoMap/0.1 Android navigation app")
+        connection.setRequestProperty("User-Agent", "MotoMap/0.2 Android navigation app")
         connection.connectTimeout = 8000
         connection.readTimeout = 8000
         connection.inputStream.use { input ->
             val body = BufferedReader(InputStreamReader(input)).readText()
-            val item = JSONArray(body).optJSONObject(0) ?: return@withContext null
+            val feature = JSONObject(body).getJSONArray("features").optJSONObject(0)
+                ?: return@use null
+            val coordinates = feature.getJSONObject("geometry").getJSONArray("coordinates")
+            val lon = coordinates.optDouble(0)
+            val lat = coordinates.optDouble(1)
+            if (!lat.isFinite() || !lon.isFinite()) return@use null
+            val props = feature.optJSONObject("properties")
+            val name = listOf(
+                props?.optString("name").orEmpty(),
+                props?.optString("city").orEmpty(),
+                props?.optString("state").orEmpty()
+            ).filter { it.isNotBlank() }.distinct().joinToString(", ")
+            Destination(lat, lon, if (name.isBlank()) query else name)
+        }
+    }.getOrNull()
+
+    if (photon != null) return@withContext photon
+
+    runCatching {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val url = URL(GEOCODER + "?format=jsonv2&limit=1&addressdetails=1&accept-language=ru&q=" + encoded)
+        val connection = url.openConnection() as HttpURLConnection
+        connection.setRequestProperty("User-Agent", "MotoMap/0.2 Android navigation app")
+        connection.connectTimeout = 8000
+        connection.readTimeout = 8000
+        connection.inputStream.use { input ->
+            val body = BufferedReader(InputStreamReader(input)).readText()
+            val item = JSONArray(body).optJSONObject(0) ?: return@use null
             Destination(item.optDouble("lat"), item.optDouble("lon"), item.optString("display_name", query))
         }
     }.getOrNull()
