@@ -505,10 +505,19 @@ private fun RideScreen(state: RideState, toggle: () -> Unit, onChanged: (RideSta
             // Передаём план на карту; карта построит кольцо от текущей GPS-позиции.
             onBuildLoop(RouteRequest("loop:" + "%.1f".format(Locale.US, km), "Кольцевой"))
         }, enabled = value.toDoubleOrNull()?.let { it > 0 } == true,
-            Modifier.fillMaxWidth().height(58.dp)) { Text("НАЙТИ МАРШРУТ", fontWeight = FontWeight.Bold) }
+            modifier = Modifier.fillMaxWidth().height(58.dp)) { Text("НАЙТИ МАРШРУТ", fontWeight = FontWeight.Bold) }
         Text("Фактические километры и время показываются после построения маршрута.", style = MaterialTheme.typography.bodySmall)
     }
     RideLocationTracker(context, state.riding, state, onChanged, null)
+}
+@Composable
+private fun Stat(title: String, value: String) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(17.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(title)
+            Text(value, fontWeight = FontWeight.Bold)
+        }
+    }
 }
 @Composable
 private fun RoutesScreen(routeRequest: RouteRequest?, onBuild: (RouteRequest) -> Unit, pad: PaddingValues) {
