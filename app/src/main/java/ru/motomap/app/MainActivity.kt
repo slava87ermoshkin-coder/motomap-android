@@ -13,6 +13,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
@@ -67,10 +68,11 @@ private const val ROUTE_SERVER = "https://valhalla1.openstreetmap.de/route"
 private const val GEOCODER = "https://nominatim.openstreetmap.org/search"
 private const val PREFS = "motomap_prefs"
 
-private data class Trip(val date: String, val km: Double, val time: String, val max: Int, val avg: Int, val fuel: Double, val elapsedSec: Long = 0L, val fuelCost: Double = 0.0, val maxAltitude: Double = 0.0)
+private data class Trip(val date: String, val km: Double, val time: String, val max: Int, val avg: Int, val fuel: Double, val elapsedSec: Long = 0L, val fuelCost: Double = 0.0, val maxAltitude: Double = 0.0, val bike: String = "Honda CB650R", val riderKg: Double = 0.0, val passengerKg: Double = 0.0, val luggageKg: Double = 0.0, val fuelL100: Double = 0.0)
 private data class RideState(val riding: Boolean = false, val speedKmh: Int = 0, val distanceKm: Double = 0.0, val elapsedSec: Long = 0L, val maxSpeedKmh: Int = 0, val maxAltitude: Double = 0.0)
 private data class RouteRequest(val destination: String, val mode: String)
 private data class Destination(val lat: Double, val lon: Double, val name: String)
+private data class RouteOption(val name: String, val description: String, val result: RouteResult?, val error: String = "")
 private data class BikePreset(val name: String, val year: String, val engine: String, val power: String, val torque: String, val weight: String, val tank: String, val fuel: String)
 
 private val bikePresets = listOf(
@@ -118,7 +120,10 @@ private fun MotoMapApp(hasLocationPermission: Boolean) {
                 val avg = if (rideState.elapsedSec > 0L) (rideState.distanceKm / (rideState.elapsedSec / 3600.0)).roundToInt() else 0
                 val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
                 val fuel = rideState.distanceKm * activeFuelL100 / 100.0
-                trips.add(Trip(date, rideState.distanceKm, formatDuration(rideState.elapsedSec), rideState.maxSpeedKmh, avg, fuel, rideState.elapsedSec, fuel * activeFuelPrice, rideState.maxAltitude))
+                val riderKg = prefs.getString("rider_weight", "0")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+                val passengerKg = prefs.getString("passenger_weight", "0")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+                val luggageKg = prefs.getString("luggage_weight", "0")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+                trips.add(Trip(date, rideState.distanceKm, formatDuration(rideState.elapsedSec), rideState.maxSpeedKmh, avg, fuel, rideState.elapsedSec, fuel * activeFuelPrice, rideState.maxAltitude, selectedBike.name, riderKg, passengerKg, luggageKg, activeFuelL100))
                 saveTrips(prefs, trips)
             }
             riding = false
@@ -288,7 +293,7 @@ private fun MapScreen(
                     }
                 }
             },
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = 220.dp, end = 12.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 150.dp, end = 12.dp),
             containerColor = MaterialTheme.colorScheme.primaryContainer
         ) {
             Text("⌾", fontSize = 28.sp, fontWeight = FontWeight.Bold)
@@ -441,7 +446,7 @@ private fun loadTrips(prefs: android.content.SharedPreferences): androidx.compos
         val a = JSONArray(raw)
         for (i in 0 until a.length()) {
             val o = a.getJSONObject(i)
-            list.add(Trip(o.getString("date"), o.getDouble("km"), o.getString("time"), o.getInt("max"), o.getInt("avg"), o.getDouble("fuel"), o.optLong("elapsedSec", 0L), o.optDouble("fuelCost", 0.0), o.optDouble("maxAltitude", 0.0)))
+            list.add(Trip(o.getString("date"), o.getDouble("km"), o.getString("time"), o.getInt("max"), o.getInt("avg"), o.getDouble("fuel"), o.optLong("elapsedSec", 0L), o.optDouble("fuelCost", 0.0), o.optDouble("maxAltitude", 0.0), o.optString("bike", "Honda CB650R"), o.optDouble("riderKg", 0.0), o.optDouble("passengerKg", 0.0), o.optDouble("luggageKg", 0.0), o.optDouble("fuelL100", 0.0)))
         }
     }
     return list
@@ -450,7 +455,7 @@ private fun loadTrips(prefs: android.content.SharedPreferences): androidx.compos
 private fun saveTrips(prefs: android.content.SharedPreferences, trips: List<Trip>) {
     val a = JSONArray()
     trips.take(100).forEach {
-        a.put(JSONObject().put("date", it.date).put("km", it.km).put("time", it.time).put("max", it.max).put("avg", it.avg).put("fuel", it.fuel).put("elapsedSec", it.elapsedSec).put("fuelCost", it.fuelCost).put("maxAltitude", it.maxAltitude))
+        a.put(JSONObject().put("date", it.date).put("km", it.km).put("time", it.time).put("max", it.max).put("avg", it.avg).put("fuel", it.fuel).put("elapsedSec", it.elapsedSec).put("fuelCost", it.fuelCost).put("maxAltitude", it.maxAltitude).put("bike", it.bike).put("riderKg", it.riderKg).put("passengerKg", it.passengerKg).put("luggageKg", it.luggageKg).put("fuelL100", it.fuelL100))
     }
     prefs.edit().putString("trips", a.toString()).apply()
 }
