@@ -57,6 +57,8 @@ import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.Date
 import kotlin.math.roundToInt
 
 private const val MAP_STYLE = "https://tiles.openfreemap.org/styles/bright"
@@ -102,7 +104,25 @@ private fun MotoMapApp(hasLocationPermission: Boolean) {
     var routeRequest by remember { mutableStateOf<RouteRequest?>(null) }
     var selectedBike by remember { mutableStateOf(bikePresets.first()) }
 
-    val trips = remember { loadTrips(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+    val trips = remember { loadTrips(prefs) }
+
+    val toggleRide: () -> Unit = {
+        if (riding) {
+            if (rideState.elapsedSec > 0L || rideState.distanceKm > 0.0) {
+                val avg = if (rideState.elapsedSec > 0L) (rideState.distanceKm / (rideState.elapsedSec / 3600.0)).roundToInt() else 0
+                val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
+                trips.add(0, Trip(date, rideState.distanceKm, formatDuration(rideState.elapsedSec), rideState.maxSpeedKmh, avg, 0.0))
+                saveTrips(prefs, trips)
+            }
+            riding = false
+            rideState = RideState()
+        } else {
+            riding = true
+            rideState = RideState(riding = true)
+        }
+    }
 
     MaterialTheme {
         Scaffold(bottomBar = {
@@ -115,10 +135,11 @@ private fun MotoMapApp(hasLocationPermission: Boolean) {
         }) { pad ->
             when (tab) {
                 0 -> MapScreen(riding, rideState, hasLocationPermission, routeRequest,
-                    { riding = !riding; rideState = if (riding) RideState(riding = true) else RideState() },
+                    { toggleRide },
                     { rideState = it }, pad)
                 1 -> RideScreen(rideState,
-                    { riding = !riding; rideState = if (riding) RideState(riding = true) else RideState() }, pad)
+                    { toggleRide },
+                    { rideState = it }, pad)
                 2 -> RoutesScreen(routeRequest, { routeRequest = it; tab = 0 }, pad)
                 3 -> StatisticsScreen(trips, pad)
                 else -> SettingsScreen(selectedBike, { selectedBike = it }, pad)
