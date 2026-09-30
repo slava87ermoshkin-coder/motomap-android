@@ -65,6 +65,7 @@ import kotlin.math.roundToInt
 private const val MAP_STYLE = "https://tiles.openfreemap.org/styles/bright"
 private const val ROUTE_SERVER = "https://valhalla1.openstreetmap.de/route"
 private const val GEOCODER = "https://nominatim.openstreetmap.org/search"
+private const val PREFS = "motomap_prefs"
 
 private data class Trip(val date: String, val km: Double, val time: String, val max: Int, val avg: Int, val fuel: Double)
 private data class RideState(val riding: Boolean = false, val speedKmh: Int = 0, val distanceKm: Double = 0.0, val elapsedSec: Long = 0L, val maxSpeedKmh: Int = 0)
@@ -114,7 +115,7 @@ private fun MotoMapApp(hasLocationPermission: Boolean) {
             if (rideState.elapsedSec > 0L || rideState.distanceKm > 0.0) {
                 val avg = if (rideState.elapsedSec > 0L) (rideState.distanceKm / (rideState.elapsedSec / 3600.0)).roundToInt() else 0
                 val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
-                trips.add(0, Trip(date, rideState.distanceKm, formatDuration(rideState.elapsedSec), rideState.maxSpeedKmh, avg, 0.0))
+                trips.add(Trip(date, rideState.distanceKm, formatDuration(rideState.elapsedSec), rideState.maxSpeedKmh, avg, 0.0))
                 saveTrips(prefs, trips)
             }
             riding = false
@@ -307,7 +308,7 @@ private fun MapScreen(
         }
     }
 
-    RideLocationTracker(context, riding, rideState, onRideStateChanged)
+    RideLocationTracker(context, riding, rideState, onRideStateChanged, mapRef)
 }
 
 @SuppressLint("MissingPermission")
@@ -407,7 +408,7 @@ private fun RideLocationTracker(
     }
 }
 
-private fun loadTrips(prefs: android.content.SharedPreferences): SnapshotStateList<Trip> {
+private fun loadTrips(prefs: android.content.SharedPreferences): androidx.compose.runtime.snapshots.SnapshotStateList<Trip> {
     val list = mutableStateListOf<Trip>()
     val raw = prefs.getString("trips", null) ?: return list
     runCatching {
