@@ -265,11 +265,8 @@ private fun MapScreen(
                     view.onCreate(null)
                     view.getMapAsync { map ->
                         mapRef = map
-                        scope.launch {
-                            val styleJson = loadRussianMapStyle()
-                            map.setStyle(styleJson ?: MAP_STYLE) { style ->
-                                enableLocationIfAllowed(ctx, map, hasLocationPermission, style)
-                            }
+                        map.setStyle(MAP_STYLE) { style ->
+                            enableLocationIfAllowed(ctx, map, hasLocationPermission, style)
                         }
                     }
                 }
@@ -356,25 +353,6 @@ private fun MapScreen(
     RideLocationTracker(context, riding, rideState, onRideStateChanged, mapRef)
 }
 
-private suspend fun loadRussianMapStyle(): String? = withContext(Dispatchers.IO) {
-    runCatching {
-        val connection = URL(MAP_STYLE).openConnection() as HttpURLConnection
-        connection.connectTimeout = 10000
-        connection.readTimeout = 15000
-        val body = connection.inputStream.use { BufferedReader(InputStreamReader(it)).readText() }
-        val root = JSONObject(body)
-        val layers = root.optJSONArray("layers") ?: return@runCatching body
-        for (i in 0 until layers.length()) {
-            val layer = layers.optJSONObject(i) ?: continue
-            if (layer.optString("type") != "symbol") continue
-            val layout = layer.optJSONObject("layout") ?: continue
-            if (!layout.has("text-field")) continue
-            layout.put("text-field", JSONArray().put("coalesce").put(JSONArray().put("get").put("name:ru")).put(JSONArray().put("get").put("name:nonlatin")))
-        }
-        root.put("layers", layers)
-        root.toString()
-    }.getOrNull()
-}
 @SuppressLint("MissingPermission")
 private fun enableLocationIfAllowed(context: Context, map: MapLibreMap, allowed: Boolean, style: Style) {
     if (!allowed) return
@@ -553,8 +531,7 @@ private fun RoutesScreen(routeRequest: RouteRequest?, onBuild: (RouteRequest) ->
     val modes = listOf(
         "Быстрый" to "Минимальное время",
         "Мото" to "Баланс скорости и мото-дорог",
-        "Извилистый" to "Больше второстепенных дорог",
-        "Красивый" to "Приоритет живописных дорог"
+        "Извилистый" to "Больше второстепенных дорог"
     )
     LaunchedEffect(calculateKey) {
         if (calculateKey == 0 || destination.isBlank()) return@LaunchedEffect
@@ -865,7 +842,7 @@ private suspend fun requestRoute(fromLat: Double, fromLon: Double, toLat: Double
         val options = when (mode) {
             "Быстрый" -> "\"use_highways\":true,\"shortest\":false"
             "Извилистый" -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":45,\"use_tolls\":false"
-            "Красивый" -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":55,\"use_tolls\":false"
+
             else -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":90"
         }
         val json = "{\"locations\":[{\"lat\":" + fromLat + ",\"lon\":" + fromLon + ",\"type\":\"break\"},{\"lat\":" + toLat + ",\"lon\":" + toLon + ",\"type\":\"break\"}],\"costing\":\"auto\",\"units\":\"kilometers\",\"shape_format\":\"polyline6\",\"costing_options\":{\"auto\":{" + options + "}}}"
