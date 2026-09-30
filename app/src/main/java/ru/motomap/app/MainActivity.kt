@@ -141,7 +141,9 @@ private fun MotoMapApp(hasLocationPermission: Boolean) {
                     { rideState = it }, pad)
                 1 -> RideScreen(rideState,
                     { toggleRide },
-                    { rideState = it }, pad)
+                    { rideState = it },
+                    { request -> routeRequest = request; tab = 0 },
+                    pad)
                 2 -> RoutesScreen(routeRequest, { routeRequest = it; tab = 0 }, pad)
                 3 -> StatisticsScreen(trips, pad)
                 else -> SettingsScreen(selectedBike, { selectedBike = it }, pad)
@@ -437,7 +439,7 @@ private fun formatDuration(seconds: Long): String {
 }
 
 @Composable
-private fun RideScreen(state: RideState, toggle: () -> Unit, onChanged: (RideState) -> Unit, pad: PaddingValues) {
+private fun RideScreen(state: RideState, toggle: () -> Unit, onChanged: (RideState) -> Unit, onBuildLoop: (RouteRequest) -> Unit, pad: PaddingValues) {
     var mode by remember { mutableStateOf("Время") }
     var value by remember { mutableStateOf("1") }
     val timeOptions = listOf("1","2","3","4","5","6","8")
@@ -477,7 +479,7 @@ private fun RideScreen(state: RideState, toggle: () -> Unit, onChanged: (RideSta
             val n = value.toDoubleOrNull() ?: return@Button
             val km = if (mode == "Время") n * 50.0 else n
             // Передаём план на карту; карта построит кольцо от текущей GPS-позиции.
-            android.util.Log.d("MotoMap", "loop target km=" + km)
+            onBuildLoop(RouteRequest("loop:" + "%.1f".format(Locale.US, km), "Кольцевой"))
         }, enabled = value.toDoubleOrNull()?.let { it > 0 } == true,
             Modifier.fillMaxWidth().height(58.dp)) { Text("НАЙТИ МАРШРУТ", fontWeight = FontWeight.Bold) }
         Text("Фактические километры и время показываются после построения маршрута.", style = MaterialTheme.typography.bodySmall)
