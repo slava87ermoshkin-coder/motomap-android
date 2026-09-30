@@ -6,6 +6,7 @@ on:
       - main
       - v25-major-fixes
       - v26-user-requested
+      - v27-fixes
   workflow_dispatch:
 
 jobs:
