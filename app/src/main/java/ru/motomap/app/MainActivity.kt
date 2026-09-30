@@ -265,8 +265,11 @@ private fun MapScreen(
                     view.onCreate(null)
                     view.getMapAsync { map ->
                         mapRef = map
-                        map.setStyle(MAP_STYLE) { style ->
-                            enableLocationIfAllowed(ctx, map, hasLocationPermission, style)
+                        scope.launch {
+                            val styleJson = loadRussianMapStyle()
+                            map.setStyle(styleJson ?: MAP_STYLE) { style ->
+                                enableLocationIfAllowed(ctx, map, hasLocationPermission, style)
+                            }
                         }
                     }
                 }
@@ -345,6 +348,25 @@ private fun MapScreen(
     RideLocationTracker(context, riding, rideState, onRideStateChanged, mapRef)
 }
 
+private suspend fun loadRussianMapStyle(): String? = withContext(Dispatchers.IO) {
+    runCatching {
+        val connection = URL(MAP_STYLE).openConnection() as HttpURLConnection
+        connection.connectTimeout = 10000
+        connection.readTimeout = 15000
+        val body = connection.inputStream.use { BufferedReader(InputStreamReader(it)).readText() }
+        val root = JSONObject(body)
+        val layers = root.optJSONArray("layers") ?: return@runCatching body
+        for (i in 0 until layers.length()) {
+            val layer = layers.optJSONObject(i) ?: continue
+            if (layer.optString("type") != "symbol") continue
+            val layout = layer.optJSONObject("layout") ?: continue
+            if (!layout.has("text-field")) continue
+            layout.put("text-field", JSONArray().put("get").put("name:ru"))
+        }
+        root.put("layers", layers)
+        root.toString()
+    }.getOrNull()
+}
 @SuppressLint("MissingPermission")
 private fun enableLocationIfAllowed(context: Context, map: MapLibreMap, allowed: Boolean, style: Style) {
     if (!allowed) return
