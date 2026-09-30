@@ -282,16 +282,24 @@ private fun MapScreen(
                 if (!hasLocationPermission) return@FloatingActionButton
                 scope.launch {
                     val location = lastKnownLocation(context) ?: currentLocation(context)
-                    if (location != null) {
-                        mapRef?.let { map ->
-                            map.locationComponent.forceLocationUpdate(location)
-                            map.locationComponent.cameraMode = CameraMode.TRACKING
-                            map.animateCamera(
-                                org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
-                                    LatLng(location.latitude, location.longitude), 16.0
-                                ),
-                                500
-                            )
+                    val map = mapRef
+                    if (location != null && map != null) {
+                        runCatching {
+                            val style = map.style
+                            if (style != null) {
+                                enableLocationIfAllowed(context, map, true, style)
+                                val component = map.locationComponent
+                                if (component.isLocationComponentActivated && component.isLocationComponentEnabled) {
+                                    component.forceLocationUpdate(location)
+                                    component.cameraMode = CameraMode.TRACKING
+                                    map.animateCamera(
+                                        org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                                            LatLng(location.latitude, location.longitude), 16.0
+                                        ),
+                                        500
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -608,9 +616,9 @@ private fun StatisticsScreen(trips: androidx.compose.runtime.snapshots.SnapshotS
     @Composable fun Block(title: String, x: List<Trip>) {
         var open by remember(title) { mutableStateOf(false) }
         Card(Modifier.fillMaxWidth().clickable { open = !open }) {
-            Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Text(if (open) "▲" else "▼", fontWeight = FontWeight.Bold)
                 }
                 Text("%.1f км • %d поездок".format(Locale.US, km(x), x.size), fontWeight = FontWeight.Bold)
@@ -627,14 +635,14 @@ private fun StatisticsScreen(trips: androidx.compose.runtime.snapshots.SnapshotS
     }
     LazyColumn(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Text("Статистика", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text("Статистика", fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Block("За неделю", period(7))
             Block("За месяц", period(30))
             Block("За сезон", period(180))
             Block("Всего", trips)
             Card(Modifier.fillMaxWidth().clickable { historyOpen = !historyOpen }) {
-                Row(Modifier.fillMaxWidth().padding(15.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("История разовых поездок", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("История разовых поездок", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Text(if (historyOpen) "▲" else "▼", fontWeight = FontWeight.Bold)
                 }
             }
@@ -642,11 +650,11 @@ private fun StatisticsScreen(trips: androidx.compose.runtime.snapshots.SnapshotS
                 if (trips.isEmpty()) Text("История пока пуста.")
                 trips.forEach { t ->
                     Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(t.date, fontWeight = FontWeight.Bold)
-                            Text(t.bike + " • %.1f км • %s".format(Locale.US, t.km, t.time))
-                            Text("Водитель: %.0f кг • пассажир: %.0f кг • багаж: %.0f кг".format(Locale.US, t.riderKg, t.passengerKg, t.luggageKg))
-                            Text("Расход: %.2f л/100 км • топливо: %.2f л • %.2f ₽".format(Locale.US, t.fuelL100, t.fuel, t.fuelCost))
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Дата и время: " + t.date, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(t.bike + " • %.1f км • %s".format(Locale.US, t.km, t.time), fontSize = 13.sp)
+                            Text("Водитель: %.0f кг • пассажир: %.0f кг • багаж: %.0f кг".format(Locale.US, t.riderKg, t.passengerKg, t.luggageKg), fontSize = 12.sp)
+                            Text("Расход: %.2f л/100 км • топливо: %.2f л • %.2f ₽".format(Locale.US, t.fuelL100, t.fuel, t.fuelCost), fontSize = 12.sp)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = { editing = t }) { Text("Редактировать") }
                                 TextButton(onClick = { trips.remove(t); saveTrips(prefs, trips); refresh++ }) { Text("Удалить") }
@@ -856,9 +864,9 @@ private suspend fun requestRoute(fromLat: Double, fromLon: Double, toLat: Double
     runCatching {
         val options = when (mode) {
             "Быстрый" -> "\"use_highways\":true,\"shortest\":false"
-            "Извилистый" -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":70"
-            "Красивый" -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":60"
-            else -> "\"use_highways\":false,\"shortest\":false"
+            "Извилистый" -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":45,\"use_tolls\":false"
+            "Красивый" -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":55,\"use_tolls\":false"
+            else -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":90"
         }
         val json = "{\"locations\":[{\"lat\":" + fromLat + ",\"lon\":" + fromLon + ",\"type\":\"break\"},{\"lat\":" + toLat + ",\"lon\":" + toLon + ",\"type\":\"break\"}],\"costing\":\"auto\",\"units\":\"kilometers\",\"shape_format\":\"polyline6\",\"costing_options\":{\"auto\":{" + options + "}}}"
         val connection = URL(ROUTE_SERVER).openConnection() as HttpURLConnection
