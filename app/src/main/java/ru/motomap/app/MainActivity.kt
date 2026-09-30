@@ -30,6 +30,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -317,54 +318,91 @@ private fun enableLocationIfAllowed(context: Context, map: MapLibreMap, allowed:
         if (!component.isLocationComponentActivated) {
             val options = LocationComponentActivationOptions.builder(context, style)
                 .locationComponentOptions(LocationComponentOptions.builder(context).pulseEnabled(true).build())
-                .useDefaultLocationEngine(true).build()
+                .useDefaultLocationEngine(true)
+                .locationEngineRequest(
+                    org.maplibre.android.location.LocationEngineRequest.Builder(500L)
+                        .setFastestInterval(250L)
+                        .setPriority(org.maplibre.android.location.LocationEngineRequest.PRIORITY_HIGH_ACCURACY)
+                        .build()
+                )
+                .build()
             component.activateLocationComponent(options)
         }
         component.isLocationComponentEnabled = true
+        component.setMaxAnimationFps(60)
         component.cameraMode = CameraMode.TRACKING
     }
 }
 
 @SuppressLint("MissingPermission")
 @Composable
-private fun RideLocationTracker(context: Context, riding: Boolean, onChanged: (RideState) -> Unit) {
+private fun RideLocationTracker(
+    context: Context,
+    riding: Boolean,
+    state: RideState,
+    onChanged: (RideState) -> Unit,
+    map: MapLibreMap?
+) {
     val manager = remember(context) { context.getSystemService(Context.LOCATION_SERVICE) as LocationManager }
     DisposableEffect(riding) {
         if (!riding) return@DisposableEffect onDispose {}
+
         var last: Location? = null
-        var distance = 0.0
-        var maxSpeed = 0
-        val start = System.currentTimeMillis()
+        var distanceMeters = state.distanceKm * 1000.0
+        var maxSpeed = state.maxSpeedKmh
+        val start = System.currentTimeMillis() - state.elapsedSec * 1000L
+
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                val previous = last
-                if (previous != null && location.accuracy <= 50f && previous.accuracy <= 50f) {
-                    val d = previous.distanceTo(location).toDouble()
-                    if (d in 0.5..500.0) distance += d
+                map?.let { m ->
+                    runCatching {
+                        m.locationComponent.forceLocationUpdate(location)
+                        m.locationComponent.cameraMode = CameraMode.TRACKING
+                    }
                 }
-                val speed = if (location.hasSpeed() && location.speed >= 0f) {
-                    (location.speed * 3.6f).roundToInt()
-                } else if (previous != null) {
-                    val dt = (location.time - previous.time).coerceAtLeast(1000L)
-                    (previous.distanceTo(location) / dt * 3.6f).roundToInt()
-                } else 0
+
+                val previous = last
+                if (previous != null && location.accuracy <= 35f && previous.accuracy <= 35f) {
+                    val d = previous.distanceTo(location).toDouble()
+                    if (d in 0.5..300.0) distanceMeters += d
+                }
+
+                val speed = when {
+                    location.hasSpeed() && location.speed >= 0f -> location.speed * 3.6f
+                    previous != null -> {
+                        val dt = (location.time - previous.time).coerceAtLeast(250L)
+                        previous.distanceTo(location) / dt * 3.6f
+                    }
+                    else -> 0f
+                }.roundToInt().coerceAtLeast(0)
+
                 maxSpeed = maxOf(maxSpeed, speed)
-                onChanged(RideState(true, speed.coerceAtLeast(0), distance / 1000.0, (System.currentTimeMillis() - start) / 1000L, maxSpeed))
+                onChanged(
+                    RideState(
+                        riding = true,
+                        speedKmh = speed,
+                        distanceKm = distanceMeters / 1000.0,
+                        elapsedSec = (System.currentTimeMillis() - start) / 1000L,
+                        maxSpeedKmh = maxSpeed
+                    )
+                )
                 last = location
             }
         }
+
         var registered = false
         runCatching {
             if (manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, listener)
+                manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 500L, 0.5f, listener)
                 registered = true
             }
             if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1500L, 2f, listener)
+                manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1000L, 1f, listener)
                 registered = true
             }
         }
-        if (!registered) onChanged(RideState(true))
+
+        if (!registered) onChanged(state.copy(riding = true))
         onDispose { runCatching { manager.removeUpdates(listener) } }
     }
 }
