@@ -556,6 +556,8 @@ private fun RoutesScreen(routeRequest: RouteRequest?, onBuild: (RouteRequest) ->
 
 @Composable
 private fun StatisticsScreen(trips: androidx.compose.runtime.snapshots.SnapshotStateList<Trip>, pad: PaddingValues) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     var refresh by remember { mutableIntStateOf(0) }
     val now = remember(refresh) { System.currentTimeMillis() }
     fun millis(date: String) = runCatching { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).parse(date)?.time ?: 0L }.getOrDefault(0L)
@@ -584,7 +586,7 @@ private fun StatisticsScreen(trips: androidx.compose.runtime.snapshots.SnapshotS
             Block("За сезон", period(180))
             Block("Всего", trips)
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { trips.clear(); refresh++; }, Modifier.fillMaxWidth()) { Text("УДАЛИТЬ ВСЮ СТАТИСТИКУ") }
+            OutlinedButton(onClick = { trips.clear(); saveTrips(prefs, trips); refresh++; }, Modifier.fillMaxWidth()) { Text("УДАЛИТЬ ВСЮ СТАТИСТИКУ") }
             Text("История поездок", fontSize = 22.sp, fontWeight = FontWeight.Bold)
         }
         items(trips) { t ->
@@ -594,7 +596,7 @@ private fun StatisticsScreen(trips: androidx.compose.runtime.snapshots.SnapshotS
                     Text("%.1f км • %s".format(Locale.US, t.km, t.time))
                     Text("Средняя " + t.avg + " км/ч • максимум " + t.max + " км/ч")
                     Text("Высота " + t.maxAltitude.roundToInt() + " м • топливо %.2f л • %.2f ₽".format(Locale.US, t.fuel, t.fuelCost))
-                    TextButton(onClick = { trips.remove(t); refresh++ }) { Text("Удалить поездку") }
+                    TextButton(onClick = { trips.remove(t); saveTrips(prefs, trips); refresh++ }) { Text("Удалить поездку") }
                 }
             }
         }
