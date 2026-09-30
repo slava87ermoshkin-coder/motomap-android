@@ -160,6 +160,7 @@ private fun MapScreen(
     pad: PaddingValues
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
@@ -188,6 +189,11 @@ private fun MapScreen(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(mapRef, hasLocationPermission) {
+        val map = mapRef ?: return@LaunchedEffect
+        if (hasLocationPermission) map.style?.let { enableLocationIfAllowed(context, map, true, it) }
     }
 
     LaunchedEffect(searchRequest, mapRef) {
@@ -237,6 +243,31 @@ private fun MapScreen(
             },
             update = {}
         )
+
+        FloatingActionButton(
+            onClick = {
+                if (!hasLocationPermission) return@FloatingActionButton
+                scope.launch {
+                    val location = lastKnownLocation(context) ?: currentLocation(context)
+                    if (location != null) {
+                        mapRef?.let { map ->
+                            map.locationComponent.forceLocationUpdate(location)
+                            map.locationComponent.cameraMode = CameraMode.TRACKING
+                            map.animateCamera(
+                                org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                                    LatLng(location.latitude, location.longitude), 16.0
+                                ),
+                                500
+                            )
+                        }
+                    }
+                }
+            },
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 150.dp, end = 12.dp),
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Text("⌾", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        }
 
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Surface(Modifier.fillMaxWidth(), RoundedCornerShape(14.dp), tonalElevation = 5.dp) {
@@ -367,7 +398,8 @@ private fun formatDuration(seconds: Long): String {
 }
 
 @Composable
-private fun RideScreen(state: RideState, toggle: () -> Unit, pad: PaddingValues) {
+private fun RideScreen(state: RideState, toggle: () -> Unit, onChanged: (RideState) -> Unit, pad: PaddingValues) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Текущая поездка", fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Stat("Скорость", state.speedKmh.toString() + " км/ч")
@@ -377,6 +409,7 @@ private fun RideScreen(state: RideState, toggle: () -> Unit, pad: PaddingValues)
         Stat("Средняя скорость", if (state.elapsedSec > 0) ((state.distanceKm / (state.elapsedSec / 3600.0)).roundToInt().toString() + " км/ч") else "0 км/ч")
         Button(onClick = toggle, Modifier.fillMaxWidth().height(56.dp)) { Text(if (state.riding) "Завершить поездку" else "Начать поездку") }
     }
+    RideLocationTracker(context, state.riding, state, onChanged, null)
 }
 
 @Composable
