@@ -1,9 +1,10 @@
-name: Build MotoMap APK
+name: Build MotoMap APK v25-final
 
 on:
   push:
     branches:
       - main
+      - v25-major-fixes
   workflow_dispatch:
 
 jobs:
