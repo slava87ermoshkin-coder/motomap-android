@@ -67,8 +67,8 @@ private const val ROUTE_SERVER = "https://valhalla1.openstreetmap.de/route"
 private const val GEOCODER = "https://nominatim.openstreetmap.org/search"
 private const val PREFS = "motomap_prefs"
 
-private data class Trip(val date: String, val km: Double, val time: String, val max: Int, val avg: Int, val fuel: Double)
-private data class RideState(val riding: Boolean = false, val speedKmh: Int = 0, val distanceKm: Double = 0.0, val elapsedSec: Long = 0L, val maxSpeedKmh: Int = 0)
+private data class Trip(val date: String, val km: Double, val time: String, val max: Int, val avg: Int, val fuel: Double, val elapsedSec: Long = 0L, val fuelCost: Double = 0.0, val maxAltitude: Double = 0.0)
+private data class RideState(val riding: Boolean = false, val speedKmh: Int = 0, val distanceKm: Double = 0.0, val elapsedSec: Long = 0L, val maxSpeedKmh: Int = 0, val maxAltitude: Double = 0.0)
 private data class RouteRequest(val destination: String, val mode: String)
 private data class Destination(val lat: Double, val lon: Double, val name: String)
 private data class BikePreset(val name: String, val year: String, val engine: String, val power: String, val torque: String, val weight: String, val tank: String, val fuel: String)
@@ -105,6 +105,8 @@ private fun MotoMapApp(hasLocationPermission: Boolean) {
     var rideState by remember { mutableStateOf(RideState()) }
     var routeRequest by remember { mutableStateOf<RouteRequest?>(null) }
     var selectedBike by remember { mutableStateOf(bikePresets.first()) }
+    var activeFuelL100 by remember { mutableStateOf(5.0) }
+    var activeFuelPrice by remember { mutableStateOf(0.0) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
@@ -115,12 +117,16 @@ private fun MotoMapApp(hasLocationPermission: Boolean) {
             if (rideState.elapsedSec > 0L || rideState.distanceKm > 0.0) {
                 val avg = if (rideState.elapsedSec > 0L) (rideState.distanceKm / (rideState.elapsedSec / 3600.0)).roundToInt() else 0
                 val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
-                trips.add(Trip(date, rideState.distanceKm, formatDuration(rideState.elapsedSec), rideState.maxSpeedKmh, avg, 0.0))
+                val fuel = rideState.distanceKm * activeFuelL100 / 100.0
+                trips.add(Trip(date, rideState.distanceKm, formatDuration(rideState.elapsedSec), rideState.maxSpeedKmh, avg, fuel, rideState.elapsedSec, fuel * activeFuelPrice, rideState.maxAltitude))
                 saveTrips(prefs, trips)
             }
             riding = false
             rideState = RideState()
         } else {
+            val fallback = selectedBike.fuel.replace(",", ".").substringBefore(" ").toDoubleOrNull() ?: 5.0
+            activeFuelL100 = prefs.getString("fuel_consumption", null)?.replace(",", ".")?.toDoubleOrNull() ?: fallback
+            activeFuelPrice = prefs.getString("fuel_price", "0")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
             riding = true
             rideState = RideState(riding = true)
         }
@@ -368,6 +374,7 @@ private fun RideLocationTracker(
         var last: Location? = null
         var distanceMeters = state.distanceKm * 1000.0
         var maxSpeed = state.maxSpeedKmh
+        var maxAltitude = state.maxAltitude
         val start = System.currentTimeMillis() - state.elapsedSec * 1000L
 
         val listener = object : LocationListener {
@@ -395,13 +402,15 @@ private fun RideLocationTracker(
                 }.roundToInt().coerceAtLeast(0)
 
                 maxSpeed = maxOf(maxSpeed, speed)
+                if (location.hasAltitude()) maxAltitude = maxOf(maxAltitude, location.altitude)
                 onChanged(
                     RideState(
                         riding = true,
                         speedKmh = speed,
                         distanceKm = distanceMeters / 1000.0,
                         elapsedSec = (System.currentTimeMillis() - start) / 1000L,
-                        maxSpeedKmh = maxSpeed
+                        maxSpeedKmh = maxSpeed,
+                        maxAltitude = maxAltitude
                     )
                 )
                 last = location
@@ -432,7 +441,7 @@ private fun loadTrips(prefs: android.content.SharedPreferences): androidx.compos
         val a = JSONArray(raw)
         for (i in 0 until a.length()) {
             val o = a.getJSONObject(i)
-            list.add(Trip(o.getString("date"), o.getDouble("km"), o.getString("time"), o.getInt("max"), o.getInt("avg"), o.getDouble("fuel")))
+            list.add(Trip(o.getString("date"), o.getDouble("km"), o.getString("time"), o.getInt("max"), o.getInt("avg"), o.getDouble("fuel"), o.optLong("elapsedSec", 0L), o.optDouble("fuelCost", 0.0), o.optDouble("maxAltitude", 0.0)))
         }
     }
     return list
@@ -441,7 +450,7 @@ private fun loadTrips(prefs: android.content.SharedPreferences): androidx.compos
 private fun saveTrips(prefs: android.content.SharedPreferences, trips: List<Trip>) {
     val a = JSONArray()
     trips.take(100).forEach {
-        a.put(JSONObject().put("date", it.date).put("km", it.km).put("time", it.time).put("max", it.max).put("avg", it.avg).put("fuel", it.fuel))
+        a.put(JSONObject().put("date", it.date).put("km", it.km).put("time", it.time).put("max", it.max).put("avg", it.avg).put("fuel", it.fuel).put("elapsedSec", it.elapsedSec).put("fuelCost", it.fuelCost).put("maxAltitude", it.maxAltitude))
     }
     prefs.edit().putString("trips", a.toString()).apply()
 }
