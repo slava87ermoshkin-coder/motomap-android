@@ -1,4 +1,4 @@
-name: Build MotoMap APK v25
+name: Build MotoMap APK v25-final
 
 on:
   push:
