@@ -361,7 +361,7 @@ private suspend fun loadRussianMapStyle(): String? = withContext(Dispatchers.IO)
             if (layer.optString("type") != "symbol") continue
             val layout = layer.optJSONObject("layout") ?: continue
             if (!layout.has("text-field")) continue
-            layout.put("text-field", JSONArray().put("get").put("name:ru"))
+            layout.put("text-field", JSONArray().put("coalesce").put(JSONArray().put("get").put("name:ru")).put(JSONArray().put("get").put("name:nonlatin")))
         }
         root.put("layers", layers)
         root.toString()
