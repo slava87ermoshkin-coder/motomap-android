@@ -608,21 +608,18 @@ private fun SettingsScreen(selectedBike: BikePreset, onBikeSelected: (BikePreset
     var rider by remember { mutableStateOf(prefs.getString("rider_weight", "80") ?: "80") }
     var passenger by remember { mutableStateOf(prefs.getString("passenger_weight", "0") ?: "0") }
     var luggage by remember { mutableStateOf(prefs.getString("luggage_weight", "0") ?: "0") }
-
+    var fuel by remember { mutableStateOf(prefs.getString("fuel_consumption", null) ?: selectedBike.fuel.replace(",", ".").substringBefore(" ")) }
+    var price by remember { mutableStateOf(prefs.getString("fuel_price", "0") ?: "0") }
     LazyColumn(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Text("Мотоцикл", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("Выберите модель — заводские характеристики заполнятся автоматически.", style = MaterialTheme.typography.bodySmall)
+            Text("Настройки", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text("Параметры считываются заново при каждом нажатии НАЧАТЬ ПОЕЗДКУ. Уже начатая поездка использует свой снимок параметров.", style = MaterialTheme.typography.bodySmall)
+            Text("Мотоцикл", fontWeight = FontWeight.Bold)
             Box {
-                OutlinedButton(onClick = { expanded = true }, Modifier.fillMaxWidth()) {
-                    Text(selectedBike.name + " • " + selectedBike.year)
-                }
+                OutlinedButton(onClick = { expanded = true }, Modifier.fillMaxWidth()) { Text(selectedBike.name + " • " + selectedBike.year) }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     bikePresets.forEach { bike ->
-                        DropdownMenuItem(
-                            text = { Text(bike.name + " • " + bike.year) },
-                            onClick = { onBikeSelected(bike); expanded = false }
-                        )
+                        DropdownMenuItem(text = { Text(bike.name + " • " + bike.year) }, onClick = { onBikeSelected(bike); expanded = false })
                     }
                 }
             }
@@ -632,15 +629,19 @@ private fun SettingsScreen(selectedBike: BikePreset, onBikeSelected: (BikePreset
             Spec("Снаряжённая масса", selectedBike.weight)
             Spec("Бак", selectedBike.tank)
             Spec("Заводской расход", selectedBike.fuel)
-            Spacer(Modifier.height(8.dp))
-            Text("Параметры поездки", fontWeight = FontWeight.Bold)
+            Text("Параметры следующей поездки", fontWeight = FontWeight.Bold)
             Field("Вес водителя, кг", rider) { rider = it; prefs.edit().putString("rider_weight", it).apply() }
             Field("Вес пассажира, кг", passenger) { passenger = it; prefs.edit().putString("passenger_weight", it).apply() }
             Field("Вес багажа, кг", luggage) { luggage = it; prefs.edit().putString("luggage_weight", it).apply() }
+            Field("Расход, л/100 км", fuel) { fuel = it; prefs.edit().putString("fuel_consumption", it).apply() }
+            Field("Цена топлива, ₽/л", price) { price = it; prefs.edit().putString("fuel_price", it).apply() }
+            OutlinedButton(onClick = {
+                prefs.edit().putString("rider_weight", rider).putString("passenger_weight", passenger).putString("luggage_weight", luggage).putString("fuel_consumption", fuel).putString("fuel_price", price).apply()
+            }, Modifier.fillMaxWidth()) { Text("СОХРАНИТЬ ПАРАМЕТРЫ") }
+            Text("Если расход не задан, при старте используется заводской расход выбранного мотоцикла. Старые значения другой поездки не переносятся.", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
-
 @Composable
 private fun Spec(title: String, value: String) {
     Card(Modifier.fillMaxWidth()) {
