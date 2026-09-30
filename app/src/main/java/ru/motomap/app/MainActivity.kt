@@ -468,18 +468,9 @@ private fun RideScreen(state: RideState, toggle: () -> Unit, onChanged: (RideSta
     var value by remember { mutableStateOf("1") }
     val timeOptions = listOf("1","2","3","4","5","6","8")
     val distanceOptions = listOf("50","100","150","200","300","400","500")
-    val context = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Покататься", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        if (state.riding) {
-            Stat("Скорость", state.speedKmh.toString() + " км/ч")
-            Stat("Расстояние", "%.1f км".format(Locale.US, state.distanceKm))
-            Stat("Время", formatDuration(state.elapsedSec))
-            Stat("Максимальная скорость", state.maxSpeedKmh.toString() + " км/ч")
-            Button(onClick = toggle, Modifier.fillMaxWidth().height(56.dp)) { Text("ЗАВЕРШИТЬ ПОЕЗДКУ") }
-            Divider()
-        }
-        Text("Выберите цель", fontWeight = FontWeight.Bold)
+        Text("Выберите цель поездки", fontWeight = FontWeight.Bold)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = mode == "Время", onClick = { mode = "Время"; value = "1" }, label = { Text("⏱ Время") })
             FilterChip(selected = mode == "Расстояние", onClick = { mode = "Расстояние"; value = "200" }, label = { Text("📏 Расстояние") })
@@ -495,20 +486,17 @@ private fun RideScreen(state: RideState, toggle: () -> Unit, onChanged: (RideSta
                 }
             }
         }
-        OutlinedTextField(value, { value = it.filter { c -> c.isDigit() }.take(4) },
-            label = { Text(if (mode == "Время") "Свое время, часов" else "Свое расстояние, км") },
-            singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value, { value = it.filter { c -> c.isDigit() }.take(4) }, label = { Text(if (mode == "Время") "Свое время, часов" else "Свое расстояние, км") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Text("Старт: 📍 текущее местоположение\nМаршрут: A → B → C → D → A")
         Button(onClick = {
             val n = value.toDoubleOrNull() ?: return@Button
             val km = if (mode == "Время") n * 50.0 else n
-            // Передаём план на карту; карта построит кольцо от текущей GPS-позиции.
             onBuildLoop(RouteRequest("loop:" + "%.1f".format(Locale.US, km), "Кольцевой"))
-        }, enabled = value.toDoubleOrNull()?.let { it > 0 } == true,
-            modifier = Modifier.fillMaxWidth().height(58.dp)) { Text("НАЙТИ МАРШРУТ", fontWeight = FontWeight.Bold) }
-        Text("Фактические километры и время показываются после построения маршрута.", style = MaterialTheme.typography.bodySmall)
+        }, enabled = value.toDoubleOrNull()?.let { it > 0 } == true, modifier = Modifier.fillMaxWidth().height(58.dp)) {
+            Text("НАЙТИ МАРШРУТ", fontWeight = FontWeight.Bold)
+        }
+        Text("Маршрут строится от текущей позиции и возвращается в точку старта. Фактические километры и время показываются на карте.", style = MaterialTheme.typography.bodySmall)
     }
-    RideLocationTracker(context, state.riding, state, onChanged, null)
 }
 @Composable
 private fun Stat(title: String, value: String) {
