@@ -205,6 +205,21 @@ private fun MapScreen(
         val map = mapRef ?: return@LaunchedEffect
         if (request.destination.isBlank()) return@LaunchedEffect
 
+        if (request.mode == "Кольцевой") {
+            val targetKm = request.destination.removePrefix("loop:").toDoubleOrNull()
+            if (targetKm == null || targetKm <= 0.0) return@LaunchedEffect
+            status = "Строю кольцевой маршрут…"
+            val origin = currentLocation(context)
+            if (origin == null) { status = "Не удалось определить GPS-позицию."; return@LaunchedEffect }
+            val loop = requestLoopRoute(origin.latitude, origin.longitude, targetKm)
+            if (loop == null) status = "Кольцевой маршрут не построен. Проверьте интернет."
+            else {
+                drawRoute(map, loop)
+                status = "Кольцо: " + loop.distanceKm + " км • " + loop.minutes + " мин"
+                map.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(LatLng(origin.latitude, origin.longitude), 10.5), 500)
+            }
+            return@LaunchedEffect
+        }
         status = "Ищу пункт назначения…"
         val target = geocode(request.destination)
         if (target == null) {
@@ -672,6 +687,37 @@ private suspend fun geocode(query: String): Destination? = withContext(Dispatche
     }.getOrNull()
 }
 
+private suspend fun requestLoopRoute(fromLat: Double, fromLon: Double, targetKm: Double): RouteResult? = withContext(Dispatchers.IO) {
+    runCatching {
+        val radiusKm = (targetKm / (2.0 * Math.PI)).coerceIn(3.0, 120.0)
+        val latScale = 111.0
+        val lonScale = 111.0 * kotlin.math.cos(Math.toRadians(fromLat)).coerceAtLeast(0.15)
+        fun p(angle: Double): Pair<Double, Double> {
+            val a = Math.toRadians(angle)
+            return Pair(fromLat + radiusKm * kotlin.math.cos(a) / latScale, fromLon + radiusKm * kotlin.math.sin(a) / lonScale)
+        }
+        val b = p(0.0); val c = p(90.0); val d = p(180.0)
+        val locs = listOf(Pair(fromLat, fromLon), b, c, d, Pair(fromLat, fromLon))
+        val locationJson = locs.joinToString(",") { loc -> "{\\\"lat\\\":" + loc.first + ",\\\"lon\\\":" + loc.second + ",\\\"type\\\":\\\"break\\\"}" }
+        val json = "{\\\"locations\\\":[" + locationJson + "],\\\"costing\\\":\\\"auto\\\",\\\"units\\\":\\\"kilometers\\\",\\\"shape_format\\\":\\\"polyline6\\\",\\\"costing_options\\\":{\\\"auto\\\":{\\\"use_highways\\\":false,\\\"shortest\\\":false}}}"
+        val connection = URL(ROUTE_SERVER).openConnection() as HttpURLConnection
+        connection.requestMethod = "POST"; connection.doOutput = true
+        connection.setRequestProperty("Content-Type", "application/json")
+        connection.setRequestProperty("X-Client-Id", "motomap-android")
+        connection.connectTimeout = 12000; connection.readTimeout = 20000
+        connection.outputStream.use { it.write(json.toByteArray()) }
+        val body = BufferedReader(InputStreamReader(connection.inputStream)).readText()
+        val trip = JSONObject(body).getJSONObject("trip")
+        val summary = trip.getJSONObject("summary")
+        val legs = trip.getJSONArray("legs")
+        val points = ArrayList<LatLng>()
+        for (i in 0 until legs.length()) {
+            val part = decodePolyline6(legs.getJSONObject(i).getString("shape"))
+            if (points.isEmpty()) points.addAll(part) else points.addAll(part.drop(1))
+        }
+        RouteResult(points, "%.1f".format(Locale.US, summary.getDouble("length")), (summary.getDouble("time") / 60.0).roundToInt().toString())
+    }.getOrNull()
+}
 private suspend fun requestRoute(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double, mode: String): RouteResult? = withContext(Dispatchers.IO) {
     runCatching {
         val options = when (mode) {
