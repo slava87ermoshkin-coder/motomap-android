@@ -693,19 +693,26 @@ private suspend fun requestLoopRoute(fromLat: Double, fromLon: Double, targetKm:
         val latScale = 111.0
         val lonScale = 111.0 * kotlin.math.cos(Math.toRadians(fromLat)).coerceAtLeast(0.15)
         fun p(angle: Double): Pair<Double, Double> {
-            val a = Math.toRadians(angle)
-            return Pair(fromLat + radiusKm * kotlin.math.cos(a) / latScale, fromLon + radiusKm * kotlin.math.sin(a) / lonScale)
+            val r = Math.toRadians(angle)
+            return Pair(fromLat + radiusKm * kotlin.math.cos(r) / latScale, fromLon + radiusKm * kotlin.math.sin(r) / lonScale)
         }
-        val b = p(0.0); val c = p(90.0); val d = p(180.0)
-        val locs = listOf(Pair(fromLat, fromLon), b, c, d, Pair(fromLat, fromLon))
-        val locationJson = locs.joinToString(",") { loc -> "{\\\"lat\\\":" + loc.first + ",\\\"lon\\\":" + loc.second + ",\\\"type\\\":\\\"break\\\"}" }
-        val json = "{\\\"locations\\\":[" + locationJson + "],\\\"costing\\\":\\\"auto\\\",\\\"units\\\":\\\"kilometers\\\",\\\"shape_format\\\":\\\"polyline6\\\",\\\"costing_options\\\":{\\\"auto\\\":{\\\"use_highways\\\":false,\\\"shortest\\\":false}}}"
+        val locs = listOf(Pair(fromLat, fromLon), p(0.0), p(90.0), p(180.0), Pair(fromLat, fromLon))
+        val locations = JSONArray()
+        locs.forEach { loc -> locations.put(JSONObject().put("lat", loc.first).put("lon", loc.second).put("type", "break")) }
+        val json = JSONObject()
+            .put("locations", locations)
+            .put("costing", "auto")
+            .put("units", "kilometers")
+            .put("shape_format", "polyline6")
+            .put("costing_options", JSONObject().put("auto", JSONObject().put("use_highways", false).put("shortest", false)))
         val connection = URL(ROUTE_SERVER).openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"; connection.doOutput = true
+        connection.requestMethod = "POST"
+        connection.doOutput = true
         connection.setRequestProperty("Content-Type", "application/json")
         connection.setRequestProperty("X-Client-Id", "motomap-android")
-        connection.connectTimeout = 12000; connection.readTimeout = 20000
-        connection.outputStream.use { it.write(json.toByteArray()) }
+        connection.connectTimeout = 12000
+        connection.readTimeout = 20000
+        connection.outputStream.use { it.write(json.toString().toByteArray()) }
         val body = BufferedReader(InputStreamReader(connection.inputStream)).readText()
         val trip = JSONObject(body).getJSONObject("trip")
         val summary = trip.getJSONObject("summary")
