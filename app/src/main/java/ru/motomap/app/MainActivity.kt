@@ -320,12 +320,6 @@ private fun enableLocationIfAllowed(context: Context, map: MapLibreMap, allowed:
             val options = LocationComponentActivationOptions.builder(context, style)
                 .locationComponentOptions(LocationComponentOptions.builder(context).pulseEnabled(true).build())
                 .useDefaultLocationEngine(true)
-                .locationEngineRequest(
-                    org.maplibre.android.location.LocationEngineRequest.Builder(500L)
-                        .setFastestInterval(250L)
-                        .setPriority(org.maplibre.android.location.LocationEngineRequest.PRIORITY_HIGH_ACCURACY)
-                        .build()
-                )
                 .build()
             component.activateLocationComponent(options)
         }
@@ -530,6 +524,8 @@ private fun StatisticsScreen(trips: List<Trip>, pad: PaddingValues) {
 
 @Composable
 private fun SettingsScreen(selectedBike: BikePreset, onBikeSelected: (BikePreset) -> Unit, pad: PaddingValues) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     var expanded by remember { mutableStateOf(false) }
     var rider by remember { mutableStateOf(prefs.getString("rider_weight", "80") ?: "80") }
     var passenger by remember { mutableStateOf(prefs.getString("passenger_weight", "0") ?: "0") }
