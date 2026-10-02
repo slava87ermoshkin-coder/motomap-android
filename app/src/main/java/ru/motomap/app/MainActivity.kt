@@ -64,7 +64,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import kotlin.math.roundToInt
 
-private const val MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty"
+private const val MAP_STYLE = "asset://osm.json"
 private const val ROUTE_SERVER = "https://valhalla1.openstreetmap.de/route"
 private const val GEOCODER = "https://nominatim.openstreetmap.org/search"
 private const val PREFS = "motomap_prefs"
