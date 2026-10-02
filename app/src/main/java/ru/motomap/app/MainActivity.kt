@@ -13,6 +13,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
@@ -31,6 +32,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -62,15 +64,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import kotlin.math.roundToInt
 
-private const val MAP_STYLE = "https://tiles.openfreemap.org/styles/bright"
+private const val MAP_STYLE = "asset://osm.json"
 private const val ROUTE_SERVER = "https://valhalla1.openstreetmap.de/route"
 private const val GEOCODER = "https://nominatim.openstreetmap.org/search"
 private const val PREFS = "motomap_prefs"
 
-private data class Trip(val date: String, val km: Double, val time: String, val max: Int, val avg: Int, val fuel: Double, val elapsedSec: Long = 0L, val fuelCost: Double = 0.0, val maxAltitude: Double = 0.0)
+private data class Trip(val date: String, val km: Double, val time: String, val max: Int, val avg: Int, val fuel: Double, val elapsedSec: Long = 0L, val fuelCost: Double = 0.0, val maxAltitude: Double = 0.0, val bike: String = "Honda CB650R", val riderKg: Double = 0.0, val passengerKg: Double = 0.0, val luggageKg: Double = 0.0, val fuelL100: Double = 0.0)
 private data class RideState(val riding: Boolean = false, val speedKmh: Int = 0, val distanceKm: Double = 0.0, val elapsedSec: Long = 0L, val maxSpeedKmh: Int = 0, val maxAltitude: Double = 0.0)
 private data class RouteRequest(val destination: String, val mode: String)
 private data class Destination(val lat: Double, val lon: Double, val name: String)
+private data class RouteOption(val name: String, val description: String, val result: RouteResult?, val error: String = "")
 private data class BikePreset(val name: String, val year: String, val engine: String, val power: String, val torque: String, val weight: String, val tank: String, val fuel: String)
 
 private val bikePresets = listOf(
@@ -118,7 +121,10 @@ private fun MotoMapApp(hasLocationPermission: Boolean) {
                 val avg = if (rideState.elapsedSec > 0L) (rideState.distanceKm / (rideState.elapsedSec / 3600.0)).roundToInt() else 0
                 val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
                 val fuel = rideState.distanceKm * activeFuelL100 / 100.0
-                trips.add(Trip(date, rideState.distanceKm, formatDuration(rideState.elapsedSec), rideState.maxSpeedKmh, avg, fuel, rideState.elapsedSec, fuel * activeFuelPrice, rideState.maxAltitude))
+                val riderKg = prefs.getString("rider_weight", "0")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+                val passengerKg = prefs.getString("passenger_weight", "0")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+                val luggageKg = prefs.getString("luggage_weight", "0")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+                trips.add(Trip(date, rideState.distanceKm, formatDuration(rideState.elapsedSec), rideState.maxSpeedKmh, avg, fuel, rideState.elapsedSec, fuel * activeFuelPrice, rideState.maxAltitude, selectedBike.name, riderKg, passengerKg, luggageKg, activeFuelL100))
                 saveTrips(prefs, trips)
             }
             riding = false
@@ -193,12 +199,25 @@ private fun MapScreen(
                 Lifecycle.Event.ON_RESUME -> mapView.onResume()
                 Lifecycle.Event.ON_PAUSE -> mapView.onPause()
                 Lifecycle.Event.ON_STOP -> mapView.onStop()
-                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
                 else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+
+        // MapScreen is often created while the Activity is already RESUMED.
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            runCatching { mapView.onStart() }
+        }
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            runCatching { mapView.onResume() }
+        }
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            runCatching { mapView.onPause() }
+            runCatching { mapView.onStop() }
+            runCatching { mapView.onDestroy() }
+        }
     }
 
     LaunchedEffect(mapRef, hasLocationPermission) {
@@ -274,21 +293,29 @@ private fun MapScreen(
                 if (!hasLocationPermission) return@FloatingActionButton
                 scope.launch {
                     val location = lastKnownLocation(context) ?: currentLocation(context)
-                    if (location != null) {
-                        mapRef?.let { map ->
-                            map.locationComponent.forceLocationUpdate(location)
-                            map.locationComponent.cameraMode = CameraMode.TRACKING
-                            map.animateCamera(
-                                org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
-                                    LatLng(location.latitude, location.longitude), 16.0
-                                ),
-                                500
-                            )
+                    val map = mapRef
+                    if (location != null && map != null) {
+                        runCatching {
+                            val style = map.style
+                            if (style != null) {
+                                enableLocationIfAllowed(context, map, true, style)
+                                val component = map.locationComponent
+                                if (component.isLocationComponentActivated && component.isLocationComponentEnabled) {
+                                    component.forceLocationUpdate(location)
+                                    component.cameraMode = CameraMode.TRACKING
+                                    map.animateCamera(
+                                        org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                                            LatLng(location.latitude, location.longitude), 16.0
+                                        ),
+                                        500
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             },
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = 220.dp, end = 12.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 150.dp, end = 12.dp),
             containerColor = MaterialTheme.colorScheme.primaryContainer
         ) {
             Text("⌾", fontSize = 28.sp, fontWeight = FontWeight.Bold)
@@ -332,6 +359,21 @@ private fun MapScreen(
                 }
                 Button(onClick = onToggleRide, Modifier.fillMaxWidth().height(54.dp)) {
                     Text(if (riding) "ЗАВЕРШИТЬ ПОЕЗДКУ" else "НАЧАТЬ ПОЕЗДКУ", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    // Keep the trip timer running independently of GPS callbacks.
+    val latestRideState by rememberUpdatedState(rideState)
+    val latestOnRideStateChanged by rememberUpdatedState(onRideStateChanged)
+    LaunchedEffect(riding) {
+        if (riding) {
+            while (true) {
+                delay(1000L)
+                val current = latestRideState
+                if (current.riding) {
+                    latestOnRideStateChanged(current.copy(elapsedSec = current.elapsedSec + 1L))
                 }
             }
         }
@@ -441,7 +483,7 @@ private fun loadTrips(prefs: android.content.SharedPreferences): androidx.compos
         val a = JSONArray(raw)
         for (i in 0 until a.length()) {
             val o = a.getJSONObject(i)
-            list.add(Trip(o.getString("date"), o.getDouble("km"), o.getString("time"), o.getInt("max"), o.getInt("avg"), o.getDouble("fuel"), o.optLong("elapsedSec", 0L), o.optDouble("fuelCost", 0.0), o.optDouble("maxAltitude", 0.0)))
+            list.add(Trip(o.getString("date"), o.getDouble("km"), o.getString("time"), o.getInt("max"), o.getInt("avg"), o.getDouble("fuel"), o.optLong("elapsedSec", 0L), o.optDouble("fuelCost", 0.0), o.optDouble("maxAltitude", 0.0), o.optString("bike", "Honda CB650R"), o.optDouble("riderKg", 0.0), o.optDouble("passengerKg", 0.0), o.optDouble("luggageKg", 0.0), o.optDouble("fuelL100", 0.0)))
         }
     }
     return list
@@ -450,7 +492,7 @@ private fun loadTrips(prefs: android.content.SharedPreferences): androidx.compos
 private fun saveTrips(prefs: android.content.SharedPreferences, trips: List<Trip>) {
     val a = JSONArray()
     trips.take(100).forEach {
-        a.put(JSONObject().put("date", it.date).put("km", it.km).put("time", it.time).put("max", it.max).put("avg", it.avg).put("fuel", it.fuel).put("elapsedSec", it.elapsedSec).put("fuelCost", it.fuelCost).put("maxAltitude", it.maxAltitude))
+        a.put(JSONObject().put("date", it.date).put("km", it.km).put("time", it.time).put("max", it.max).put("avg", it.avg).put("fuel", it.fuel).put("elapsedSec", it.elapsedSec).put("fuelCost", it.fuelCost).put("maxAltitude", it.maxAltitude).put("bike", it.bike).put("riderKg", it.riderKg).put("passengerKg", it.passengerKg).put("luggageKg", it.luggageKg).put("fuelL100", it.fuelL100))
     }
     prefs.edit().putString("trips", a.toString()).apply()
 }
@@ -509,54 +551,67 @@ private fun Stat(title: String, value: String) {
 }
 @Composable
 private fun RoutesScreen(routeRequest: RouteRequest?, onBuild: (RouteRequest) -> Unit, pad: PaddingValues) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var destination by remember { mutableStateOf(routeRequest?.destination ?: "") }
     var selectedMode by remember { mutableStateOf(routeRequest?.mode ?: "Мото") }
+    var calculateKey by remember { mutableIntStateOf(0) }
+    var calculating by remember { mutableStateOf(false) }
+    var options by remember { mutableStateOf<List<RouteOption>>(emptyList()) }
     val modes = listOf(
         "Быстрый" to "Минимальное время",
         "Мото" to "Баланс скорости и мото-дорог",
-        "Извилистый" to "Больше второстепенных дорог",
-        "Красивый" to "Приоритет живописных дорог"
+        "Извилистый" to "Больше второстепенных дорог"
     )
-
+    LaunchedEffect(calculateKey) {
+        if (calculateKey == 0 || destination.isBlank()) return@LaunchedEffect
+        calculating = true
+        options = emptyList()
+        val target = geocode(destination.trim())
+        val origin = currentLocation(context)
+        if (target == null || origin == null) {
+            options = modes.map { RouteOption(it.first, it.second, null, if (target == null) "Адрес не найден" else "GPS недоступен") }
+            calculating = false
+            return@LaunchedEffect
+        }
+        options = modes.map { (name, description) ->
+            val route = requestRoute(origin.latitude, origin.longitude, target.lat, target.lon, name)
+            RouteOption(name, description, route, if (route == null) "Не удалось построить" else "")
+        }
+        calculating = false
+    }
     Column(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Маршрут", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        OutlinedTextField(
-            value = destination,
-            onValueChange = { destination = it },
-            placeholder = { Text("Введите город или адрес") },
-            label = { Text("Пункт назначения") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        Text("Тип маршрута", fontWeight = FontWeight.Bold)
-
-        modes.forEach { (name, description) ->
-            Card(Modifier.fillMaxWidth().selectable(selected = selectedMode == name, onClick = { selectedMode = name }, role = Role.RadioButton)) {
-                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(selected = selectedMode == name, onClick = { selectedMode = name })
-                    Column(Modifier.padding(start = 8.dp)) {
-                        Text(name, fontWeight = FontWeight.Bold)
-                        Text(description, style = MaterialTheme.typography.bodySmall)
-                    }
+        OutlinedTextField(value = destination, onValueChange = { destination = it }, placeholder = { Text("Введите город или адрес") }, label = { Text("Пункт назначения") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { if (destination.isNotBlank()) calculateKey++ }, onDone = { if (destination.isNotBlank()) calculateKey++ }))
+        Button(onClick = { calculateKey++ }, enabled = destination.trim().isNotEmpty() && !calculating, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+            Text(if (calculating) "РАССЧИТЫВАЮ…" else "РАССЧИТАТЬ МАРШРУТЫ")
+        }
+        if (options.isNotEmpty()) Text("Время и расстояние по каждому типу", fontWeight = FontWeight.Bold)
+        options.forEach { option ->
+            val selected = selectedMode == option.name
+            Card(Modifier.fillMaxWidth().clickable { selectedMode = option.name }, colors = CardDefaults.cardColors(containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(option.name, fontWeight = FontWeight.Bold)
+                    Text(option.description, style = MaterialTheme.typography.bodySmall)
+                    if (option.result != null) {
+                        Text("Расстояние: " + option.result.distanceKm + " км", fontWeight = FontWeight.Bold)
+                        Text("Время: " + option.result.minutes + " мин", fontWeight = FontWeight.Bold)
+                    } else Text(option.error)
+                    if (selected && option.result != null) Button(onClick = { onBuild(RouteRequest(destination.trim(), option.name)) }, Modifier.fillMaxWidth()) { Text("ПОКАЗАТЬ НА КАРТЕ") }
                 }
             }
         }
-
-        Text("Выбрано: " + selectedMode, fontWeight = FontWeight.Bold)
-        Button(
-            onClick = { onBuild(RouteRequest(destination.trim(), selectedMode)) },
-            enabled = destination.trim().isNotEmpty(),
-            modifier = Modifier.fillMaxWidth().height(56.dp)
-        ) { Text("ПОСТРОИТЬ МАРШРУТ") }
     }
 }
-
 @Composable
 private fun StatisticsScreen(trips: androidx.compose.runtime.snapshots.SnapshotStateList<Trip>, pad: PaddingValues) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     var refresh by remember { mutableIntStateOf(0) }
     val now = remember(refresh) { System.currentTimeMillis() }
+    var historyOpen by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Trip?>(null) }
     fun millis(date: String) = runCatching { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).parse(date)?.time ?: 0L }.getOrDefault(0L)
     fun period(days: Long) = trips.filter { millis(it.date) >= now - days * 24L * 60L * 60L * 1000L }
     fun km(x: List<Trip>) = x.sumOf { it.km }
@@ -565,39 +620,93 @@ private fun StatisticsScreen(trips: androidx.compose.runtime.snapshots.SnapshotS
     fun cost(x: List<Trip>) = x.sumOf { it.fuelCost }
     fun avgFuel(x: List<Trip>) = if (km(x) > 0) fuel(x) * 100.0 / km(x) else 0.0
     @Composable fun Block(title: String, x: List<Trip>) {
-        Text(title, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-        Stat("Километры", "%.1f км".format(Locale.US, km(x)))
-        Stat("Часы", "%.1f ч".format(Locale.US, hours(x)))
-        Stat("Количество поездок", x.size.toString())
-        Stat("Средний расход", "%.2f л/100 км".format(Locale.US, avgFuel(x)))
-        Stat("Топливные затраты", "%.2f ₽".format(Locale.US, cost(x)))
-        Stat("Максимальная скорость", (x.maxOfOrNull { it.max } ?: 0).toString() + " км/ч")
-        Stat("Максимальная высота", (x.maxOfOrNull { it.maxAltitude } ?: 0.0).roundToInt().toString() + " м")
-        Stat("Самый длинный маршрут", "%.1f км".format(Locale.US, x.maxOfOrNull { it.km } ?: 0.0))
-    }
-    LazyColumn(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            Text("Статистика", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Block("За неделю", period(7))
-            Block("За месяц", period(30))
-            Block("За сезон", period(180))
-            Block("Всего", trips)
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { trips.clear(); saveTrips(prefs, trips); refresh++; }, Modifier.fillMaxWidth()) { Text("УДАЛИТЬ ВСЮ СТАТИСТИКУ") }
-            Text("История поездок", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        }
-        items(trips) { t ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(t.date, fontWeight = FontWeight.Bold)
-                    Text("%.1f км • %s".format(Locale.US, t.km, t.time))
-                    Text("Средняя " + t.avg + " км/ч • максимум " + t.max + " км/ч")
-                    Text("Высота " + t.maxAltitude.roundToInt() + " м • топливо %.2f л • %.2f ₽".format(Locale.US, t.fuel, t.fuelCost))
-                    TextButton(onClick = { trips.remove(t); saveTrips(prefs, trips); refresh++ }) { Text("Удалить поездку") }
+        var open by remember(title) { mutableStateOf(false) }
+        Card(Modifier.fillMaxWidth().clickable { open = !open }) {
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(if (open) "▲" else "▼", fontWeight = FontWeight.Bold)
+                }
+                Text("%.1f км • %d поездок".format(Locale.US, km(x), x.size), fontWeight = FontWeight.Bold)
+                if (open) {
+                    Stat("Часы", "%.1f ч".format(Locale.US, hours(x)))
+                    Stat("Средний расход", "%.2f л/100 км".format(Locale.US, avgFuel(x)))
+                    Stat("Топливные затраты", "%.2f ₽".format(Locale.US, cost(x)))
+                    Stat("Максимальная скорость", (x.maxOfOrNull { it.max } ?: 0).toString() + " км/ч")
+                    Stat("Максимальная высота", (x.maxOfOrNull { it.maxAltitude } ?: 0.0).roundToInt().toString() + " м")
+                    Stat("Самый длинный маршрут", "%.1f км".format(Locale.US, x.maxOfOrNull { it.km } ?: 0.0))
                 }
             }
         }
     }
+    LazyColumn(Modifier.fillMaxSize().padding(pad).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Text("Статистика", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Block("За неделю", period(7))
+            Block("За месяц", period(30))
+            Block("За сезон", period(180))
+            Block("Всего", trips)
+            Card(Modifier.fillMaxWidth().clickable { historyOpen = !historyOpen }) {
+                Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("История разовых поездок", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(if (historyOpen) "▲" else "▼", fontWeight = FontWeight.Bold)
+                }
+            }
+            if (historyOpen) {
+                if (trips.isEmpty()) Text("История пока пуста.")
+                trips.forEach { t ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Дата и время: " + t.date, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(t.bike + " • %.1f км • %s".format(Locale.US, t.km, t.time), fontSize = 13.sp)
+                            Text("Водитель: %.0f кг • пассажир: %.0f кг • багаж: %.0f кг".format(Locale.US, t.riderKg, t.passengerKg, t.luggageKg), fontSize = 12.sp)
+                            Text("Расход: %.2f л/100 км • топливо: %.2f л • %.2f ₽".format(Locale.US, t.fuelL100, t.fuel, t.fuelCost), fontSize = 12.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(onClick = { editing = t }) { Text("Редактировать") }
+                                TextButton(onClick = { trips.remove(t); saveTrips(prefs, trips); refresh++ }) { Text("Удалить") }
+                            }
+                        }
+                    }
+                }
+                OutlinedButton(onClick = { trips.clear(); saveTrips(prefs, trips); refresh++ }, Modifier.fillMaxWidth()) { Text("УДАЛИТЬ ВСЮ ИСТОРИЮ") }
+            }
+        }
+    }
+    editing?.let { trip -> TripEditorDialog(trip, { editing = null }) { updated ->
+        val index = trips.indexOfFirst { it === trip }
+        if (index >= 0) trips[index] = updated
+        saveTrips(prefs, trips)
+        refresh++
+        editing = null
+    } }
+}
+@Composable
+private fun TripEditorDialog(trip: Trip, onDismiss: () -> Unit, onSave: (Trip) -> Unit) {
+    var km by remember { mutableStateOf(trip.km.toString()) }
+    var max by remember { mutableStateOf(trip.max.toString()) }
+    var bike by remember { mutableStateOf(trip.bike) }
+    var rider by remember { mutableStateOf(trip.riderKg.toString()) }
+    var passenger by remember { mutableStateOf(trip.passengerKg.toString()) }
+    var luggage by remember { mutableStateOf(trip.luggageKg.toString()) }
+    var fuelL100 by remember { mutableStateOf(trip.fuelL100.toString()) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Редактирование поездки") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Field("Байк", bike) { bike = it }
+            Field("Километры", km) { km = it }
+            Field("Максимальная скорость", max) { max = it }
+            Field("Водитель, кг", rider) { rider = it }
+            Field("Пассажир, кг", passenger) { passenger = it }
+            Field("Багаж, кг", luggage) { luggage = it }
+            Field("Расход, л/100 км", fuelL100) { fuelL100 = it }
+        } },
+        confirmButton = { TextButton(onClick = {
+            val newKm = km.replace(",", ".").toDoubleOrNull() ?: trip.km
+            val newFuel = fuelL100.replace(",", ".").toDoubleOrNull() ?: trip.fuelL100
+            val newFuelLiters = newKm * newFuel / 100.0
+            onSave(trip.copy(km = newKm, max = max.toIntOrNull() ?: trip.max, avg = if (trip.elapsedSec > 0) (newKm / (trip.elapsedSec / 3600.0)).roundToInt() else trip.avg, fuel = newFuelLiters, fuelL100 = newFuel, fuelCost = if (trip.fuel > 0) trip.fuelCost * (newFuelLiters / trip.fuel) else trip.fuelCost, bike = bike, riderKg = rider.replace(",", ".").toDoubleOrNull() ?: trip.riderKg, passengerKg = passenger.replace(",", ".").toDoubleOrNull() ?: trip.passengerKg, luggageKg = luggage.replace(",", ".").toDoubleOrNull() ?: trip.luggageKg))
+        }) { Text("Сохранить") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
+    )
 }
 @Composable
 private fun SettingsScreen(selectedBike: BikePreset, onBikeSelected: (BikePreset) -> Unit, pad: PaddingValues) {
@@ -704,16 +813,44 @@ private fun lastKnownLocation(context: Context): Location? {
 }
 
 private suspend fun geocode(query: String): Destination? = withContext(Dispatchers.IO) {
-    runCatching {
+    // Photon first; Nominatim is a fallback if Photon is temporarily unavailable.
+    val photon = runCatching {
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val url = URL(GEOCODER + "?format=jsonv2&limit=1&q=" + encoded)
+        val url = URL("https://photon.komoot.io/api/?limit=1&lang=ru&q=" + encoded)
         val connection = url.openConnection() as HttpURLConnection
-        connection.setRequestProperty("User-Agent", "MotoMap/0.1 Android navigation app")
+        connection.setRequestProperty("User-Agent", "MotoMap/0.2 Android navigation app")
         connection.connectTimeout = 8000
         connection.readTimeout = 8000
         connection.inputStream.use { input ->
             val body = BufferedReader(InputStreamReader(input)).readText()
-            val item = JSONArray(body).optJSONObject(0) ?: return@withContext null
+            val feature = JSONObject(body).getJSONArray("features").optJSONObject(0)
+                ?: return@use null
+            val coordinates = feature.getJSONObject("geometry").getJSONArray("coordinates")
+            val lon = coordinates.optDouble(0)
+            val lat = coordinates.optDouble(1)
+            if (!lat.isFinite() || !lon.isFinite()) return@use null
+            val props = feature.optJSONObject("properties")
+            val name = listOf(
+                props?.optString("name").orEmpty(),
+                props?.optString("city").orEmpty(),
+                props?.optString("state").orEmpty()
+            ).filter { it.isNotBlank() }.distinct().joinToString(", ")
+            Destination(lat, lon, if (name.isBlank()) query else name)
+        }
+    }.getOrNull()
+
+    if (photon != null) return@withContext photon
+
+    runCatching {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val url = URL(GEOCODER + "?format=jsonv2&limit=1&addressdetails=1&accept-language=ru&q=" + encoded)
+        val connection = url.openConnection() as HttpURLConnection
+        connection.setRequestProperty("User-Agent", "MotoMap/0.2 Android navigation app")
+        connection.connectTimeout = 8000
+        connection.readTimeout = 8000
+        connection.inputStream.use { input ->
+            val body = BufferedReader(InputStreamReader(input)).readText()
+            val item = JSONArray(body).optJSONObject(0) ?: return@use null
             Destination(item.optDouble("lat"), item.optDouble("lon"), item.optString("display_name", query))
         }
     }.getOrNull()
@@ -761,9 +898,9 @@ private suspend fun requestRoute(fromLat: Double, fromLon: Double, toLat: Double
     runCatching {
         val options = when (mode) {
             "Быстрый" -> "\"use_highways\":true,\"shortest\":false"
-            "Извилистый" -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":70"
-            "Красивый" -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":60"
-            else -> "\"use_highways\":false,\"shortest\":false"
+            "Извилистый" -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":45,\"use_tolls\":false"
+
+            else -> "\"use_highways\":false,\"shortest\":false,\"top_speed\":90"
         }
         val json = "{\"locations\":[{\"lat\":" + fromLat + ",\"lon\":" + fromLon + ",\"type\":\"break\"},{\"lat\":" + toLat + ",\"lon\":" + toLon + ",\"type\":\"break\"}],\"costing\":\"auto\",\"units\":\"kilometers\",\"shape_format\":\"polyline6\",\"costing_options\":{\"auto\":{" + options + "}}}"
         val connection = URL(ROUTE_SERVER).openConnection() as HttpURLConnection
