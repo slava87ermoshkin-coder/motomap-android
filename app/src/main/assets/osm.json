@@ -1,0 +1,25 @@
+{
+  "version": 8,
+  "name": "MotoMap Street Map",
+  "sources": {
+    "base": {
+      "type": "raster",
+      "tiles": [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+      ],
+      "tileSize": 256,
+      "minzoom": 0,
+      "maxzoom": 19,
+      "attribution": "© Esri, © OpenStreetMap contributors"
+    }
+  },
+  "layers": [
+    {
+      "id": "base",
+      "type": "raster",
+      "source": "base",
+      "minzoom": 0,
+      "maxzoom": 19
+    }
+  ]
+}
