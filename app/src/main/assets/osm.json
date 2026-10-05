@@ -1,16 +1,16 @@
 {
   "version": 8,
-  "name": "MotoMap Base Map",
+  "name": "MotoMap OpenStreetMap",
   "sources": {
     "base": {
       "type": "raster",
       "tiles": [
-        "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+        "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
       ],
       "tileSize": 256,
       "minzoom": 0,
-      "maxzoom": 20,
-      "attribution": "© OpenStreetMap contributors © CARTO"
+      "maxzoom": 19,
+      "attribution": "© OpenStreetMap contributors"
     }
   },
   "layers": [
@@ -19,7 +19,7 @@
       "type": "raster",
       "source": "base",
       "minzoom": 0,
-      "maxzoom": 20
+      "maxzoom": 19
     }
   ]
 }
